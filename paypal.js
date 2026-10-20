@@ -81,3 +81,11 @@ export async function verifyWebhook(headers, event) {
   });
   return result.verification_status === 'SUCCESS';
 }
+
+export async function sendReminder(id, subject, note) {
+  return paypal(`/v2/invoicing/invoices/${id}/remind`, 'POST', {
+    subject,
+    note,
+    send_to_invoicer: false,
+  });
+}

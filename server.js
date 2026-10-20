@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import { supabase, logEvent } from './db.js';
 import { verifyWebhook } from './paypal.js';
+import { runScheduler, startScheduler } from './scheduler.js';
 
 const app = express();
 app.use(express.json());
@@ -20,12 +21,15 @@ app.post('/webhooks/paypal', async (req, res) => {
       // Payload shape may differ slightly; this checks both common locations
       const invoiceId = event.resource?.invoice?.id ?? event.resource?.id;
       console.log('Paid invoice id:', invoiceId);
-      const { error } = await supabase
+
+      const { data, error } = await supabase
         .from('invoices')
         .update({ status: 'PAID', paid_at: new Date().toISOString() })
-        .eq('paypal_invoice_id', invoiceId);
+        .eq('paypal_invoice_id', invoiceId)
+        .neq('status', 'PAID')
+        .select();
       if (error) throw error;
-      await logEvent('paid', invoiceId);
+      if (data.length) await logEvent('paid', invoiceId);
     }
     res.sendStatus(200);
   } catch (e) {
@@ -33,6 +37,11 @@ app.post('/webhooks/paypal', async (req, res) => {
     res.sendStatus(500);
   }
 });
+
+app.get('/admin/run-scheduler', async (req, res) => {
+  res.json(await runScheduler());
+});
+startScheduler();
 
 app.listen(3000, () => console.log('Server running on http://localhost:3000'));
 app.get('/', (req, res) => res.send('InOut Pilot is running'));
