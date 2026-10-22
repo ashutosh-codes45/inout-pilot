@@ -89,3 +89,25 @@ export async function sendReminder(id, subject, note) {
     send_to_invoicer: false,
   });
 }
+
+// ---- Paying branch: PayPal Payouts API ----
+export async function createPayout({ id, email, amount, currency = 'USD', note }) {
+  return paypal('/v1/payments/payouts', 'POST', {
+    sender_batch_header: {
+      sender_batch_id: `PAY-${id}`, // unique per payment: PayPal rejects duplicates
+      email_subject: 'You have a payment from Demo Merchant',
+      email_message: note || 'Payment from Demo Merchant',
+    },
+    items: [{
+      recipient_type: 'EMAIL',
+      receiver: email,
+      amount: { currency, value: Number(amount).toFixed(2) },
+      note: note || undefined,
+      sender_item_id: id,
+    }],
+  });
+}
+
+export async function getPayoutBatch(batchId) {
+  return paypal(`/v1/payments/payouts/${batchId}`);
+}

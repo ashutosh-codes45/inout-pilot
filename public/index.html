@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InOut Pilot Dashboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-grid.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-theme-quartz.css">
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px 24px; background: #fafaf8; color: #222; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .row { display: flex; gap: 8px; margin-bottom: 12px; }
+  input[type=text] { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+  button { padding: 8px 14px; border: 1px solid #888; border-radius: 6px; background: #fff; cursor: pointer; }
+  button.primary { background: #0f6e56; color: #fff; border-color: #0f6e56; }
+  button.tab.active { background: #222; color: #fff; }
+  #out { font-size: 13px; white-space: pre-wrap; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px; margin-bottom: 12px; display: none; }
+  #grid { height: 60vh; }
+  .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+  .PAID,.SUCCESS { background: #e1f5ee; } .SENT,.PROCESSING { background: #eeedfe; }
+  .OVERDUE,.PENDING_APPROVAL { background: #faeeda; } .BLOCKED,.FAILED,.REJECTED { background: #fcebeb; }
+  .act button { padding: 2px 8px; margin-right: 4px; }
+</style>
+</head>
+<body>
+<h1>InOut Pilot</h1>
+
+<div class="row">
+  <input id="msg" type="text" placeholder='e.g. "Invoice jane@acme.com $250 for logo design, due in 2 weeks" or "Pay Acme Supplies $80"'>
+  <button class="primary" id="send">Send to agent</button>
+</div>
+<div id="out"></div>
+
+<div class="row">
+  <button class="tab active" data-tab="invoices">Invoices</button>
+  <button class="tab" data-tab="payments">Payments</button>
+  <button class="tab" data-tab="audit">Audit log</button>
+  <button id="refresh">Refresh</button>
+</div>
+<div id="grid" class="ag-theme-quartz"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/dist/ag-grid-community.min.js"></script>
+<script>
+let KEY = sessionStorage.getItem('adminKey') || prompt('Admin API key');
+sessionStorage.setItem('adminKey', KEY || '');
+let data = { invoices: [], payments: [], audit: [] };
+let tab = 'invoices';
+
+async function api(path, method = 'GET', body) {
+  const res = await fetch(path, {
+    method,
+    headers: { 'x-api-key': KEY, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (res.status === 401) { sessionStorage.removeItem('adminKey'); alert('Wrong key, reload and retry'); }
+  if (!res.ok) throw new Error(json.error || res.statusText);
+  return json;
+}
+
+const money = p => p.value == null ? '' : '$' + Number(p.value).toFixed(2);
+const dt = p => p.value ? new Date(p.value).toLocaleString() : '';
+const badge = p => { const s = document.createElement('span'); s.className = 'badge ' + p.value; s.textContent = p.value; return s; };
+
+function actions(p) {
+  const wrap = document.createElement('span'); wrap.className = 'act';
+  if (p.data.status !== 'PENDING_APPROVAL') return wrap;
+  for (const [label, path] of [['Approve', 'approve'], ['Reject', 'reject']]) {
+    const b = document.createElement('button'); b.textContent = label;
+    b.onclick = async () => {
+      if (!confirm(`${label} $${p.data.amount} to ${p.data.supplier_name}?`)) return;
+      try { await api(`/payments/${p.data.id}/${path}`, 'POST'); await load(); } catch (e) { alert(e.message); }
+    };
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+const columns = {
+  invoices: [
+    { field: 'created_at', headerName: 'Created', valueFormatter: dt },
+    { field: 'client_name' }, { field: 'client_email' }, { field: 'description' },
+    { field: 'amount', valueFormatter: money },
+    { field: 'due_date' },
+    { field: 'status', cellRenderer: badge },
+    { field: 'reminders_sent', headerName: 'Reminders' },
+    { field: 'paid_at', valueFormatter: dt },
+    { field: 'paypal_invoice_id', headerName: 'PayPal ID' },
+  ],
+  payments: [
+    { field: 'created_at', headerName: 'Created', valueFormatter: dt },
+    { field: 'supplier_name' }, { field: 'supplier_email' },
+    { field: 'amount', valueFormatter: money },
+    { field: 'decision' },
+    { field: 'status', cellRenderer: badge },
+    { field: 'reason', flex: 2 }, { field: 'error', flex: 2, tooltipField: 'error' },
+    { headerName: 'Action', cellRenderer: actions, filter: false, sortable: false },
+  ],
+  audit: [
+    { field: 'created_at', headerName: 'Time', valueFormatter: dt },
+    { field: 'event' }, { field: 'detail', flex: 3 },
+  ],
+};
+
+const grid = agGrid.createGrid(document.getElementById('grid'), {
+  columnDefs: columns.invoices,
+  rowData: [],
+  defaultColDef: { sortable: true, filter: true, resizable: true, flex: 1, minWidth: 110 },
+  pagination: true, paginationPageSize: 25,
+});
+
+function show() {
+  grid.setGridOption('columnDefs', columns[tab]);
+  grid.setGridOption('rowData', data[tab]);
+}
+async function load() { data = await api('/api/overview'); show(); }
+
+document.querySelectorAll('button.tab').forEach(b => b.onclick = () => {
+  document.querySelectorAll('button.tab').forEach(x => x.classList.remove('active'));
+  b.classList.add('active'); tab = b.dataset.tab; show();
+});
+document.getElementById('refresh').onclick = load;
+
+document.getElementById('send').onclick = async () => {
+  const input = document.getElementById('msg'), out = document.getElementById('out');
+  if (!input.value.trim()) return;
+  out.style.display = 'block'; out.textContent = 'Working...';
+  try {
+    out.textContent = JSON.stringify(await api('/agent/request', 'POST', { message: input.value }), null, 2);
+    input.value = ''; await load();
+  } catch (e) { out.textContent = 'Error: ' + e.message; }
+};
+
+load().catch(e => alert(e.message));
+setInterval(() => load().catch(() => {}), 15000);
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import cron from 'node-cron';
 import { supabase, logEvent } from './db.js';
 import { getInvoice, sendReminder } from './paypal.js';
+import { reconcilePayouts } from './payments.js';
 
 const MAX_REMINDERS = 3;
 const GAP_DAYS = Number(process.env.REMINDER_GAP_DAYS ?? 2);
@@ -68,6 +69,10 @@ export async function runScheduler() {
       results.push(`${inv.paypal_invoice_id}: error`);
     }
   }
+   try { 
+    results.push(...(await reconcilePayouts())); 
+  } catch (e) { console.error('reconcilePayouts', e.message);
+   }
   return results;
 }
 
@@ -75,3 +80,5 @@ export function startScheduler() {
   cron.schedule('0 9 * * *', () => runScheduler().then(r => console.log('Scheduler ran:', r)));
   console.log('Scheduler armed: daily at 09:00');
 }
+
+  
