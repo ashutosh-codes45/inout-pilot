@@ -3,6 +3,7 @@ import cron from 'node-cron';
 import { supabase, logEvent } from './db.js';
 import { getInvoice, sendReminder } from './paypal.js';
 import { reconcilePayouts } from './payments.js';
+import { releaseWaitingForInvoice } from './payments.js';
 
 const MAX_REMINDERS = 3;
 const GAP_DAYS = Number(process.env.REMINDER_GAP_DAYS ?? 2);
@@ -38,6 +39,7 @@ export async function runScheduler() {
           .update({ status: 'PAID', paid_at: new Date().toISOString() })
           .eq('id', inv.id);
         await logEvent('paid', `${inv.paypal_invoice_id} (found by scheduler)`);
+        await releaseWaitingForInvoice(inv.id);
         results.push(`${inv.paypal_invoice_id}: marked paid`);
         continue;
       }

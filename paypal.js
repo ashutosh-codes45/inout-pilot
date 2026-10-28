@@ -111,3 +111,20 @@ export async function createPayout({ id, email, amount, currency = 'USD', note }
 export async function getPayoutBatch(batchId) {
   return paypal(`/v1/payments/payouts/${batchId}`);
 }
+
+export async function sendPayout({ email, amount, currency = 'USD', note, senderItemId }) {
+  return paypal('/v1/payments/payouts', 'POST', {
+    sender_batch_header: {
+      sender_batch_id: `inout-${senderItemId}`,
+      email_subject: 'You have a payment',
+      email_message: note || 'Payment from your merchant partner',
+    },
+    items: [{
+      recipient_type: 'EMAIL',
+      receiver: email,
+      amount: { value: amount.toFixed(2), currency },
+      note: note || 'Payment',
+      sender_item_id: senderItemId,
+    }],
+  });
+}

@@ -5,7 +5,7 @@ import { supabase, logEvent } from './db.js';
 import { verifyWebhook } from './paypal.js';
 import { runScheduler, startScheduler } from './scheduler.js';
 import { handleMerchantRequest } from './agent.js';
-import { approvePayout, rejectPayout, reconcileBatch } from './payments.js';
+import { approvePayout, rejectPayout, reconcileBatch, releaseWaitingForInvoice, cancelWaiting } from './payments.js';
 
 const app = express();
 app.use(express.json());
@@ -42,6 +42,9 @@ app.post('/webhooks/paypal', async (req, res) => {
         .select();
       if (error) throw error;
       if (data.length) await logEvent('paid', invoiceId);
+      // Release linked payouts. Runs even on a repeat webhook, so a failed attempt can be retried.
+      const { data: inv } = await supabase.from('invoices').select('id').eq('paypal_invoice_id', invoiceId).maybeSingle();
+      if (inv) await releaseWaitingForInvoice(inv.id);
     }
 
     // Payout events: don't trust payload shape for status, just re-read the batch from PayPal.
@@ -72,6 +75,10 @@ app.post('/payments/:id/approve', requireAdmin, async (req, res) => {
 });
 app.post('/payments/:id/reject', requireAdmin, async (req, res) => {
   try { res.json(await rejectPayout(req.params.id)); }
+  catch (e) { res.status(409).json({ error: e.message }); }
+});
+app.post('/payments/:id/cancel', requireAdmin, async (req, res) => {
+  try { res.json(await cancelWaiting(req.params.id)); }
   catch (e) { res.status(409).json({ error: e.message }); }
 });
 

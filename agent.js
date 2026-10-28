@@ -4,8 +4,8 @@ import { requestPayout } from './payments.js';
 import { logEvent } from './db.js';
 
 // Free LLM via any OpenAI-compatible endpoint. Defaults to Groq's free tier.
-// To use OpenRouter instead: LLM_BASE_URL=https://openrouter.ai/api/v1, LLM_MODEL=openai/gpt-oss-120b:free
-const BASE_URL = process.env.LLM_BASE_URL ?? 'https://api.groq.com/openai/v1';
+// To use OpenRouter instead: LLM_BASE_URL=https://openrouter.ai, LLM_MODEL=openai/gpt-oss-120b:free
+const BASE_URL = process.env.LLM_BASE_URL ?? 'https://groq.com';
 const MODEL = process.env.LLM_MODEL ?? 'openai/gpt-oss-120b';
 
 const toolDefs = [
@@ -33,6 +33,8 @@ const toolDefs = [
         supplier: { type: 'string', description: 'Supplier name as the merchant wrote it' },
         amount: { type: 'number', description: 'USD' },
         note: { type: 'string' },
+        after_client_pays: { type: 'string', description: 'Only if the merchant says to pay once a client pays: the client name or PayPal invoice id (INV2-...)' },
+        supplier_due_date: { type: 'string', description: 'YYYY-MM-DD, when the supplier payment is due' },
       },
       required: ['supplier', 'amount'],
     },
@@ -73,7 +75,12 @@ const handlers = {
   async request_payout(i) {
     if (!i.supplier?.trim()) throw new Error('supplier missing');
     if (!posNum(i.amount)) throw new Error('amount invalid');
-    return requestPayout({ supplierName: i.supplier, amount: i.amount, note: i.note ?? '' });
+    if (i.supplier_due_date && !isDate(i.supplier_due_date)) throw new Error('supplier_due_date must be YYYY-MM-DD');
+    return requestPayout({
+      supplierName: i.supplier, amount: i.amount, note: i.note ?? '',
+      afterPaid: i.after_client_pays?.trim() || null,
+      supplierDueDate: i.supplier_due_date || null,
+    });
   },
   async ask_clarification(i) {
     return { question: i.question };
@@ -103,6 +110,7 @@ export async function handleMerchantRequest(message) {
           content:
             `You route a small merchant's requests. Today is ${today}. ` +
             `Receiving money -> create_invoice. Paying a supplier -> request_payout. ` +
+            `If the merchant says to pay a supplier only after or when a client pays, set after_client_pays. ` +
             `If anything required is missing or ambiguous, call ask_clarification instead of guessing. ` +
             `Resolve relative dates ("in 2 weeks") to YYYY-MM-DD. ` +
             `You do not decide whether payments are allowed; a policy engine does.`,
