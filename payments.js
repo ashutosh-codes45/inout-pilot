@@ -36,9 +36,12 @@ export async function requestPayout({ supplierName, amount, note = '', afterPaid
 
   let decision, reason, status;
   if (waiting) {
-    const pre = precheck({ supplier, amount });   // fail fast on rules that can't change later
-    if (pre) ({ decision, reason } = pre), (status = 'BLOCKED');
-    else {
+    const pre = precheck({ supplier, amount }); // fail fast on rules that can't change later
+    if (pre) {
+      decision = pre.decision;
+      reason = pre.reason;
+      status = 'BLOCKED';
+    } else {
       decision = 'WAIT';
       status = 'WAITING_FOR_CLIENT';
       reason = `Waiting for ${linked.client_name} to pay invoice ${linked.paypal_invoice_id}`;
@@ -79,7 +82,7 @@ export async function releaseWaitingForInvoice(invoiceId) {
       decided_at: decision === 'ASK' ? null : new Date().toISOString(),
     }).eq('id', p.id).eq('status', 'WAITING_FOR_CLIENT').select();
     if (e2) throw e2;
-    if (!data.length) continue;               // another run already released it
+    if (!data.length) continue; // another run already released it
     await logEvent('payout_released', `${p.id}: client paid, policy says ${decision}`);
     if (decision === 'AUTO') await sendPayout(data[0]);
     released.push({ id: p.id, decision });
@@ -95,6 +98,54 @@ export async function cancelWaiting(id) {
   if (!data.length) throw new Error('Payment not found or not waiting for a client');
   await logEvent('payout_cancelled', id);
   return { id, status: 'CANCELLED' };
+}
+
+/** Merchant chose to pay a waiting payout early, in full or in part. Policy limits still apply. */
+export async function payNow(id, amount = null) {
+  const { data: p, error } = await supabase.from('payments')
+    .select('*').eq('id', id).eq('status', 'WAITING_FOR_CLIENT').maybeSingle();
+  if (error) throw error;
+  if (!p) throw new Error('Payment not found or not waiting for a client');
+  const full = Number(p.amount);
+  const pay = amount == null ? full : Number(amount);
+  if (!Number.isFinite(pay) || pay <= 0 || pay > full) throw new Error(`Amount must be between 0 and ${full}`);
+
+  const supplier = await findSupplier(p.supplier_name);
+  const { decision, reason } = await evaluatePayout({ supplier, amount: pay });
+  if (decision === 'BLOCK') {
+    await logEvent('payout_blocked', `${id}: ${reason} (pay now)`);
+    throw new Error(`Blocked: ${reason}`);
+  }
+  const now = new Date().toISOString();
+
+  if (pay === full) {
+    const { data, error: e } = await supabase.from('payments').update({
+      status: 'PROCESSING', decision: 'MANUAL', reason: 'Merchant chose to pay before the client paid', decided_at: now,
+    }).eq('id', id).eq('status', 'WAITING_FOR_CLIENT').select();
+    if (e) throw e;
+    if (!data.length) throw new Error('Payment is no longer waiting');
+    await logEvent('payout_paid_early', `${id} $${pay}`);
+    await sendPayout(data[0]);
+    return { id, status: 'PROCESSING', paid: pay, remaining: 0 };
+  }
+
+  const remaining = Number((full - pay).toFixed(2));
+  const { data: cut, error: e1 } = await supabase.from('payments')
+    .update({ amount: remaining }).eq('id', id).eq('status', 'WAITING_FOR_CLIENT').eq('amount', full).select();
+  if (e1) throw e1;
+  if (!cut.length) throw new Error('Payment changed, try again');
+  const { data: part, error: e2 } = await supabase.from('payments').insert({
+    supplier_name: p.supplier_name, supplier_email: p.supplier_email, amount: pay, currency: p.currency,
+    note: `${p.note ?? ''} (partial early payment)`.trim(), decision: 'MANUAL',
+    reason: 'Merchant paid part before the client paid', status: 'PROCESSING', decided_at: now,
+  }).select().single();
+  if (e2) {
+    await supabase.from('payments').update({ amount: full }).eq('id', id); // roll back
+    throw e2;
+  }
+  await logEvent('payout_paid_early', `${part.id} $${pay} of $${full}; $${remaining} still waiting`);
+  await sendPayout(part);
+  return { id: part.id, status: 'PROCESSING', paid: pay, remaining };
 }
 
 /** Merchant clicked OK. The conditional update means a double-click can't pay twice. */

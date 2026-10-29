@@ -5,7 +5,10 @@ import { supabase, logEvent } from './db.js';
 import { verifyWebhook } from './paypal.js';
 import { runScheduler, startScheduler } from './scheduler.js';
 import { handleMerchantRequest } from './agent.js';
-import { approvePayout, rejectPayout, reconcileBatch, releaseWaitingForInvoice, cancelWaiting } from './payments.js';
+import {
+  approvePayout, rejectPayout, reconcileBatch,
+  releaseWaitingForInvoice, cancelWaiting, payNow,
+} from './payments.js';
 
 const app = express();
 app.use(express.json());
@@ -42,6 +45,7 @@ app.post('/webhooks/paypal', async (req, res) => {
         .select();
       if (error) throw error;
       if (data.length) await logEvent('paid', invoiceId);
+
       // Release linked payouts. Runs even on a repeat webhook, so a failed attempt can be retried.
       const { data: inv } = await supabase.from('invoices').select('id').eq('paypal_invoice_id', invoiceId).maybeSingle();
       if (inv) await releaseWaitingForInvoice(inv.id);
@@ -77,12 +81,38 @@ app.post('/payments/:id/reject', requireAdmin, async (req, res) => {
   try { res.json(await rejectPayout(req.params.id)); }
   catch (e) { res.status(409).json({ error: e.message }); }
 });
+
+// ---------- Pay-when-paid: cancel, or pay early after an alert ----------
 app.post('/payments/:id/cancel', requireAdmin, async (req, res) => {
   try { res.json(await cancelWaiting(req.params.id)); }
   catch (e) { res.status(409).json({ error: e.message }); }
 });
+app.post('/payments/:id/pay-now', requireAdmin, async (req, res) => {
+  try { res.json(await payNow(req.params.id, req.body?.amount ?? null)); }
+  catch (e) { res.status(409).json({ error: e.message }); }
+});
+app.post('/payments/:id/extension', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('payments')
+      .select('id, supplier_name, extension_draft')
+      .eq('id', req.params.id).eq('status', 'WAITING_FOR_CLIENT').maybeSingle();
+    if (error) throw error;
+    if (!data?.extension_draft) throw new Error('No extension draft for this payment');
+    await logEvent('extension_requested', req.params.id);
+    res.json(data);
+  } catch (e) { res.status(409).json({ error: e.message }); }
+});
 
 // ---------- Dashboard data ----------
+app.get('/api/alerts', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('payments').select('*')
+      .eq('status', 'WAITING_FOR_CLIENT').not('alerted_at', 'is', null).order('alerted_at', { ascending: false });
+    if (error) throw error;
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/overview', requireAdmin, async (req, res) => {
   try {
     const [inv, pay, audit] = await Promise.all([
@@ -102,6 +132,8 @@ app.get('/admin/run-scheduler', requireAdmin, async (req, res) => {
 });
 
 app.get('/health', (req, res) => res.send('InOut Pilot is running'));
+
+startScheduler();
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

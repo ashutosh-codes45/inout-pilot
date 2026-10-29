@@ -4,6 +4,7 @@ import { supabase, logEvent } from './db.js';
 import { getInvoice, sendReminder } from './paypal.js';
 import { reconcilePayouts } from './payments.js';
 import { releaseWaitingForInvoice } from './payments.js';
+import { runAlerts } from './alerts.js';
 
 const MAX_REMINDERS = 3;
 const GAP_DAYS = Number(process.env.REMINDER_GAP_DAYS ?? 2);
@@ -75,6 +76,7 @@ export async function runScheduler() {
     results.push(...(await reconcilePayouts())); 
   } catch (e) { console.error('reconcilePayouts', e.message);
    }
+  results.push(...(await runAlerts()));
   return results;
 }
 
