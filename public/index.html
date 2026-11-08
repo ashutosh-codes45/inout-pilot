@@ -3,136 +3,273 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>InOut Pilot Dashboard</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-grid.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/styles/ag-theme-quartz.css">
+<title>InOut Pilot dashboard</title>
+<link rel="stylesheet" href="/vendor/ag-grid/styles/ag-grid.css">
+<link rel="stylesheet" href="/vendor/ag-grid/styles/ag-theme-quartz.css">
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px 24px; background: #fafaf8; color: #222; }
-  h1 { font-size: 20px; margin: 0 0 12px; }
-  .row { display: flex; gap: 8px; margin-bottom: 12px; }
-  input[type=text] { flex: 1; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-  button { padding: 8px 14px; border: 1px solid #888; border-radius: 6px; background: #fff; cursor: pointer; }
-  button.primary { background: #0f6e56; color: #fff; border-color: #0f6e56; }
-  button.tab.active { background: #222; color: #fff; }
-  #out { font-size: 13px; white-space: pre-wrap; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px; margin-bottom: 12px; display: none; }
-  #grid { height: 60vh; }
-  .badge { padding: 2px 8px; border-radius: 10px; font-size: 12px; }
-  .PAID,.SUCCESS { background: #e1f5ee; } .SENT,.PROCESSING { background: #eeedfe; }
-  .OVERDUE,.PENDING_APPROVAL { background: #faeeda; } .BLOCKED,.FAILED,.REJECTED { background: #fcebeb; }
-  .act button { padding: 2px 8px; margin-right: 4px; }
+  :root { --bg:#f6f5f1; --card:#fff; --ink:#1f1f1c; --muted:#6b6a65; --line:#e3e1da; --teal:#0f6e56; --red:#a32d2d; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:14px 20px; background:var(--card); border-bottom:1px solid var(--line); }
+  h1 { font-size:18px; margin:0; font-weight:600; }
+  h1 small { font-weight:400; color:var(--muted); margin-left:8px; }
+  .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  input[type=password] { padding:6px 8px; border:1px solid var(--line); border-radius:6px; width:210px; font:inherit; }
+  button { padding:6px 12px; border:1px solid var(--line); background:var(--card); border-radius:6px; cursor:pointer; font:inherit; color:var(--ink); }
+  button:hover { background:#f0eee8; }
+  button.primary { background:var(--teal); color:#fff; border-color:var(--teal); }
+  button.warn { color:var(--red); }
+  main { padding:16px 20px; max-width:1400px; margin:0 auto; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; }
+  .kpi .label { color:var(--muted); font-size:12px; }
+  .kpi .value { font-size:22px; font-weight:600; margin-top:2px; }
+  .tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .tab { border-radius:999px; }
+  .tab.active { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .grid { height:520px; width:100%; display:none; }
+  .grid.active { display:block; }
+  #msg { margin:8px 0; min-height:20px; font-size:13px; color:var(--muted); }
+  #msg.err { color:var(--red); }
+  #msg.ok { color:var(--teal); }
+  dialog { border:1px solid var(--line); border-radius:12px; max-width:560px; width:92%; }
+  dialog textarea { width:100%; height:180px; font:inherit; padding:8px; }
+  dialog h3 { margin:0 0 8px; font-size:16px; }
+  .btns { display:flex; gap:4px; align-items:center; height:100%; }
+  .btns button { padding:2px 8px; font-size:12px; }
 </style>
 </head>
 <body>
-<h1>InOut Pilot</h1>
+<header>
+  <h1>InOut Pilot <small>cash-flow guardian for small merchants</small></h1>
+  <div class="controls">
+    <input id="key" type="password" placeholder="Admin key" autocomplete="off">
+    <button id="connect" class="primary">Connect</button>
+    <button id="refresh">Refresh</button>
+  </div>
+</header>
+<main>
+  <div class="kpis">
+    <div class="kpi"><div class="label">Expected in (unpaid invoices)</div><div class="value" id="k-in">-</div></div>
+    <div class="kpi"><div class="label">Overdue invoices</div><div class="value" id="k-overdue">-</div></div>
+    <div class="kpi"><div class="label">Payouts waiting on clients</div><div class="value" id="k-wait">-</div></div>
+    <div class="kpi"><div class="label">Awaiting your approval</div><div class="value" id="k-appr">-</div></div>
+    <div class="kpi"><div class="label">Paid out</div><div class="value" id="k-out">-</div></div>
+  </div>
+  <div id="msg"></div>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-grid="attention">Needs attention</button>
+    <button class="tab" data-grid="invoices">Invoices</button>
+    <button class="tab" data-grid="payouts">Payouts</button>
+    <button class="tab" data-grid="scores">Payer scores</button>
+    <button class="tab" data-grid="audit">Audit log</button>
+  </div>
+  <div id="grid-attention" class="grid ag-theme-quartz active"></div>
+  <div id="grid-invoices" class="grid ag-theme-quartz"></div>
+  <div id="grid-payouts" class="grid ag-theme-quartz"></div>
+  <div id="grid-scores" class="grid ag-theme-quartz"></div>
+  <div id="grid-audit" class="grid ag-theme-quartz"></div>
+</main>
 
-<div class="row">
-  <input id="msg" type="text" placeholder='e.g. "Invoice jane@acme.com $250 for logo design, due in 2 weeks" or "Pay Acme Supplies $80"'>
-  <button class="primary" id="send">Send to agent</button>
-</div>
-<div id="out"></div>
+<dialog id="draft">
+  <h3 id="draft-title"></h3>
+  <textarea id="draft-text" readonly></textarea>
+  <p>
+    <button id="draft-copy" class="primary">Copy</button>
+    <button id="draft-close">Close</button>
+  </p>
+</dialog>
 
-<div class="row">
-  <button class="tab active" data-tab="invoices">Invoices</button>
-  <button class="tab" data-tab="payments">Payments</button>
-  <button class="tab" data-tab="audit">Audit log</button>
-  <button id="refresh">Refresh</button>
-</div>
-<div id="grid" class="ag-theme-quartz"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.3.3/dist/ag-grid-community.min.js"></script>
+<script src="/vendor/ag-grid/dist/ag-grid-community.min.js"></script>
 <script>
-let KEY = sessionStorage.getItem('adminKey') || prompt('Admin API key');
-sessionStorage.setItem('adminKey', KEY || '');
-let data = { invoices: [], payments: [], audit: [] };
-let tab = 'invoices';
+const state = { key: sessionStorage.getItem('inout-key') || '', data: null, scores: [] };
+const $ = (id) => document.getElementById(id);
+const money = (n) => '$' + Number(n || 0).toFixed(2);
+const fmtTime = (s) => (s ? new Date(s).toLocaleString() : '');
+const say = (text, cls = '') => { const m = $('msg'); m.textContent = text; m.className = cls; };
 
-async function api(path, method = 'GET', body) {
+async function api(path, opts = {}) {
   const res = await fetch(path, {
-    method,
-    headers: { 'x-api-key': KEY, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
+    ...opts,
+    headers: { 'x-api-key': state.key, 'Content-Type': 'application/json', ...(opts.headers || {}) },
   });
-  const json = await res.json().catch(() => ({}));
-  if (res.status === 401) { sessionStorage.removeItem('adminKey'); alert('Wrong key, reload and retry'); }
-  if (!res.ok) throw new Error(json.error || res.statusText);
-  return json;
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+const post = (id, action, body) => api('/payments/' + id + '/' + action, { method: 'POST', body: JSON.stringify(body || {}) });
+
+const COLORS = {
+  PAID: '#0f6e56', SUCCESS: '#0f6e56', Reliable: '#0f6e56',
+  SENT: '#534ab7', PROCESSING: '#534ab7',
+  WAITING_FOR_CLIENT: '#854f0b', PENDING_APPROVAL: '#854f0b', Watch: '#854f0b',
+  OVERDUE: '#a32d2d', FAILED: '#a32d2d', BLOCKED: '#a32d2d', REJECTED: '#a32d2d', Risky: '#a32d2d',
+  CANCELLED: '#6b6a65', New: '#6b6a65',
+};
+const colored = (p) => ({ color: COLORS[p.value] || 'inherit', fontWeight: 600 });
+const wrapCol = { wrapText: true, autoHeight: true };
+
+// ---------- actions ----------
+async function run(label, fn) {
+  try { say(label + '...'); await fn(); say(label + ': done', 'ok'); await refresh(true); }
+  catch (e) { say(label + ' failed: ' + e.message, 'err'); }
+}
+const doApprove = (r) => confirm('Approve ' + money(r.amount) + ' to ' + r.supplier_name + '?') && run('Approve', () => post(r.id, 'approve'));
+const doReject = (r) => run('Reject', () => post(r.id, 'reject'));
+const doPayNow = (r) => confirm('Pay ' + money(r.amount) + ' to ' + r.supplier_name + ' now, before the client pays?') && run('Pay now', () => post(r.id, 'pay-now'));
+const doCancel = (r) => confirm('Cancel this waiting payout?') && run('Cancel', () => post(r.id, 'cancel'));
+function doPayPart(r) {
+  const v = prompt('How much of ' + money(r.amount) + ' do you want to pay now?');
+  if (v === null) return;
+  const amt = Number(v);
+  if (!(amt > 0)) return say('Enter a positive amount', 'err');
+  return run('Pay part', () => post(r.id, 'pay-now', { amount: amt }));
+}
+async function doDraft(r) {
+  try {
+    const d = await post(r.id, 'extension');
+    $('draft-title').textContent = 'Extension request to ' + d.supplier_name;
+    $('draft-text').value = d.extension_draft;
+    $('draft').showModal();
+  } catch (e) { say('Draft failed: ' + e.message, 'err'); }
 }
 
-const money = p => p.value == null ? '' : '$' + Number(p.value).toFixed(2);
-const dt = p => p.value ? new Date(p.value).toLocaleString() : '';
-const badge = p => { const s = document.createElement('span'); s.className = 'badge ' + p.value; s.textContent = p.value; return s; };
-
-function actions(p) {
-  const wrap = document.createElement('span'); wrap.className = 'act';
-  if (p.data.status !== 'PENDING_APPROVAL') return wrap;
-  for (const [label, path] of [['Approve', 'approve'], ['Reject', 'reject']]) {
-    const b = document.createElement('button'); b.textContent = label;
-    b.onclick = async () => {
-      if (!confirm(`${label} $${p.data.amount} to ${p.data.supplier_name}?`)) return;
-      try { await api(`/payments/${p.data.id}/${path}`, 'POST'); await load(); } catch (e) { alert(e.message); }
-    };
+function actionsRenderer(p) {
+  const row = p.data;
+  const wrap = document.createElement('div');
+  wrap.className = 'btns';
+  const add = (label, fn, cls) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.addEventListener('click', () => fn(row));
     wrap.appendChild(b);
+  };
+  if (row.status === 'PENDING_APPROVAL') { add('Approve', doApprove, 'primary'); add('Reject', doReject, 'warn'); }
+  else if (row.status === 'WAITING_FOR_CLIENT') {
+    add('Pay now', doPayNow, 'primary'); add('Pay part', doPayPart); add('Draft', doDraft); add('Cancel', doCancel, 'warn');
   }
   return wrap;
 }
 
-const columns = {
-  invoices: [
-    { field: 'created_at', headerName: 'Created', valueFormatter: dt },
-    { field: 'client_name' }, { field: 'client_email' }, { field: 'description' },
-    { field: 'amount', valueFormatter: money },
-    { field: 'due_date' },
-    { field: 'status', cellRenderer: badge },
-    { field: 'reminders_sent', headerName: 'Reminders' },
-    { field: 'paid_at', valueFormatter: dt },
-    { field: 'paypal_invoice_id', headerName: 'PayPal ID' },
-  ],
-  payments: [
-    { field: 'created_at', headerName: 'Created', valueFormatter: dt },
-    { field: 'supplier_name' }, { field: 'supplier_email' },
-    { field: 'amount', valueFormatter: money },
-    { field: 'decision' },
-    { field: 'status', cellRenderer: badge },
-    { field: 'reason', flex: 2 }, { field: 'error', flex: 2, tooltipField: 'error' },
-    { headerName: 'Action', cellRenderer: actions, filter: false, sortable: false },
-  ],
-  audit: [
-    { field: 'created_at', headerName: 'Time', valueFormatter: dt },
-    { field: 'event' }, { field: 'detail', flex: 3 },
-  ],
-};
-
-const grid = agGrid.createGrid(document.getElementById('grid'), {
-  columnDefs: columns.invoices,
-  rowData: [],
-  defaultColDef: { sortable: true, filter: true, resizable: true, flex: 1, minWidth: 110 },
-  pagination: true, paginationPageSize: 25,
-});
-
-function show() {
-  grid.setGridOption('columnDefs', columns[tab]);
-  grid.setGridOption('rowData', data[tab]);
+// ---------- grids ----------
+const apis = {};
+function makeGrid(name, columnDefs) {
+  apis[name] = agGrid.createGrid($('grid-' + name), {
+    columnDefs, rowData: [],
+    defaultColDef: { sortable: true, filter: true, resizable: true },
+    animateRows: true,
+  });
 }
-async function load() { data = await api('/api/overview'); show(); }
 
-document.querySelectorAll('button.tab').forEach(b => b.onclick = () => {
-  document.querySelectorAll('button.tab').forEach(x => x.classList.remove('active'));
-  b.classList.add('active'); tab = b.dataset.tab; show();
-});
-document.getElementById('refresh').onclick = load;
+function buildGrids() {
+  makeGrid('attention', [
+    { headerName: 'Supplier', field: 'supplier_name', width: 160 },
+    { headerName: 'Amount', field: 'amount', width: 100, valueFormatter: (p) => money(p.value) },
+    { headerName: 'Status', field: 'status', width: 170, cellStyle: colored },
+    { headerName: 'Supplier due', field: 'due_date', width: 120 },
+    { headerName: 'What is happening', valueGetter: (p) => p.data.alert_text || p.data.reason, flex: 1, minWidth: 280, ...wrapCol },
+    { headerName: 'Actions', width: 300, sortable: false, filter: false, cellRenderer: actionsRenderer },
+  ]);
+  makeGrid('invoices', [
+    { headerName: 'Client', field: 'client_name', width: 160 },
+    { headerName: 'Payer tier', valueGetter: (p) => state.tiers.get(String(p.data.client_name).trim().toLowerCase()) || 'New', width: 120, cellStyle: colored },
+    { headerName: 'Amount', field: 'amount', width: 100, valueFormatter: (p) => money(p.value) },
+    { headerName: 'Due', field: 'due_date', width: 120 },
+    { headerName: 'Status', field: 'status', width: 120, cellStyle: colored },
+    { headerName: 'Reminders', field: 'reminders_sent', width: 110 },
+    { headerName: 'Paid at', field: 'paid_at', width: 180, valueFormatter: (p) => fmtTime(p.value) },
+    { headerName: 'PayPal invoice', field: 'paypal_invoice_id', flex: 1, minWidth: 220 },
+  ]);
+  makeGrid('payouts', [
+    { headerName: 'Supplier', field: 'supplier_name', width: 160 },
+    { headerName: 'Amount', field: 'amount', width: 100, valueFormatter: (p) => money(p.value) },
+    { headerName: 'Status', field: 'status', width: 170, cellStyle: colored },
+    { headerName: 'Decision', field: 'decision', width: 110 },
+    { headerName: 'Supplier due', field: 'due_date', width: 120 },
+    { headerName: 'Created', field: 'created_at', width: 180, valueFormatter: (p) => fmtTime(p.value) },
+    { headerName: 'Reason', field: 'reason', flex: 1, minWidth: 280, ...wrapCol },
+  ]);
+  makeGrid('scores', [
+    { headerName: 'Client', field: 'client_name', width: 170 },
+    { headerName: 'Tier', field: 'tier', width: 110, cellStyle: colored },
+    { headerName: 'Score', field: 'score', width: 100 },
+    { headerName: 'Invoices', field: 'invoices', width: 100 },
+    { headerName: 'Paid', field: 'paid', width: 90 },
+    { headerName: 'Avg days late', field: 'avgDaysLate', width: 130 },
+    { headerName: 'Overdue now', field: 'overdueOpen', width: 130 },
+    { headerName: 'Why', field: 'reason', flex: 1, minWidth: 300, ...wrapCol },
+  ]);
+  makeGrid('audit', [
+    { headerName: 'Time', field: 'created_at', width: 190, valueFormatter: (p) => fmtTime(p.value), sort: 'desc' },
+    { headerName: 'Event', field: 'event', width: 190 },
+    { headerName: 'Detail', field: 'detail', flex: 1, minWidth: 320, ...wrapCol },
+  ]);
+}
 
-document.getElementById('send').onclick = async () => {
-  const input = document.getElementById('msg'), out = document.getElementById('out');
-  if (!input.value.trim()) return;
-  out.style.display = 'block'; out.textContent = 'Working...';
+// ---------- data ----------
+const sum = (rows, f) => rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+
+function render() {
+  const { invoices, payments, audit } = state.data;
+  state.tiers = new Map(state.scores.map((s) => [String(s.client_name).trim().toLowerCase(), s.tier]));
+  const unpaid = invoices.filter((i) => i.status !== 'PAID');
+  const waiting = payments.filter((p) => p.status === 'WAITING_FOR_CLIENT');
+  const pending = payments.filter((p) => p.status === 'PENDING_APPROVAL');
+  $('k-in').textContent = money(sum(unpaid));
+  $('k-overdue').textContent = invoices.filter((i) => i.status === 'OVERDUE').length;
+  $('k-wait').textContent = money(sum(waiting));
+  $('k-appr').textContent = pending.length;
+  $('k-out').textContent = money(sum(payments.filter((p) => p.status === 'SUCCESS')));
+
+  apis.attention.setGridOption('rowData', payments.filter((p) => ['PENDING_APPROVAL', 'WAITING_FOR_CLIENT'].includes(p.status)));
+  apis.invoices.setGridOption('rowData', invoices);
+  apis.payouts.setGridOption('rowData', payments);
+  apis.scores.setGridOption('rowData', state.scores);
+  apis.audit.setGridOption('rowData', audit);
+}
+
+async function refresh(quiet) {
+  if (!state.key) return say('Enter your admin key to load data', 'err');
   try {
-    out.textContent = JSON.stringify(await api('/agent/request', 'POST', { message: input.value }), null, 2);
-    input.value = ''; await load();
-  } catch (e) { out.textContent = 'Error: ' + e.message; }
-};
+    const [data, scores] = await Promise.all([api('/api/overview'), api('/api/scores')]);
+    state.data = data;
+    state.scores = scores;
+    render();
+    if (!quiet) say('Updated ' + new Date().toLocaleTimeString());
+  } catch (e) {
+    say(e.message === 'Unauthorized' ? 'Wrong admin key' : 'Load failed: ' + e.message, 'err');
+  }
+}
 
-load().catch(e => alert(e.message));
-setInterval(() => load().catch(() => {}), 15000);
+// ---------- wiring ----------
+state.tiers = new Map();
+if (typeof agGrid === 'undefined') {
+  say('AG Grid did not load. Run: npm install ag-grid-community@31.3.4 and restart the server', 'err');
+} else {
+  buildGrids();
+  $('tabs').addEventListener('click', (e) => {
+    const name = e.target.dataset && e.target.dataset.grid;
+    if (!name) return;
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === e.target));
+    document.querySelectorAll('.grid').forEach((g) => g.classList.toggle('active', g.id === 'grid-' + name));
+    apis[name].sizeColumnsToFit();
+  });
+  $('connect').addEventListener('click', () => {
+    state.key = $('key').value.trim();
+    sessionStorage.setItem('inout-key', state.key);
+    $('key').value = '';
+    refresh();
+  });
+  $('refresh').addEventListener('click', () => refresh());
+  $('draft-close').addEventListener('click', () => $('draft').close());
+  $('draft-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText($('draft-text').value); say('Draft copied', 'ok'); }
+    catch { $('draft-text').select(); }
+  });
+  if (state.key) refresh(); else say('Enter your admin key to load data');
+  setInterval(() => { if (state.key) refresh(true); }, 20000);
+}
 </script>
 </body>
 </html>

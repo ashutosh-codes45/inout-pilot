@@ -9,9 +9,11 @@ import {
   approvePayout, rejectPayout, reconcileBatch,
   releaseWaitingForInvoice, cancelWaiting, payNow,
 } from './payments.js';
+import { computeScores } from './scores.js';
 
 const app = express();
 app.use(express.json());
+app.use('/vendor/ag-grid', express.static('node_modules/ag-grid-community'));
 app.use(express.static('public')); // dashboard (data endpoints below need the key)
 
 // ---------- auth for everything except the PayPal webhook ----------
@@ -134,6 +136,11 @@ app.get('/admin/run-scheduler', requireAdmin, async (req, res) => {
 app.get('/health', (req, res) => res.send('InOut Pilot is running'));
 
 startScheduler();
+
+app.get('/api/scores', requireAdmin, async (req, res) => {
+  try { res.json(await computeScores()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

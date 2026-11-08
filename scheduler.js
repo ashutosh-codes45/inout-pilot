@@ -5,6 +5,9 @@ import { getInvoice, sendReminder } from './paypal.js';
 import { reconcilePayouts } from './payments.js';
 import { releaseWaitingForInvoice } from './payments.js';
 import { runAlerts } from './alerts.js';
+import { tierMap, keyOf } from './scores.js';
+
+const LEAD_DAYS = { Risky: 5, Watch: 3, Reliable: 1, New: 1 };
 
 const MAX_REMINDERS = 3;
 const GAP_DAYS = Number(process.env.REMINDER_GAP_DAYS ?? 2);
@@ -26,6 +29,7 @@ export async function runScheduler() {
   const today = new Date().toISOString().slice(0, 10);
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
   const results = [];
+  const tiers = await tierMap();
 
   const { data: invoices, error } = await supabase
     .from('invoices').select('*').in('status', ['SENT', 'OVERDUE']);
@@ -51,21 +55,25 @@ export async function runScheduler() {
         await supabase.from('invoices').update({ status: 'OVERDUE' }).eq('id', inv.id);
       }
 
-      // 3. Decide whether to remind
-      if (!overdue && inv.due_date > tomorrow) continue;
+      // 3. Decide whether to remind (earlier and more often for risky payers)
+      const tier = tiers.get(keyOf(inv.client_name)) ?? 'New';
+      const remindFrom = new Date(Date.now() + LEAD_DAYS[tier] * 86400000).toISOString().slice(0, 10);
+      if (!overdue && inv.due_date > remindFrom) continue;
       if (inv.reminders_sent >= MAX_REMINDERS) continue;
+      const gap = tier === 'Risky' ? Math.min(GAP_DAYS, 1) : GAP_DAYS;
       if (inv.last_reminder_at) {
         const daysSince = (Date.now() - new Date(inv.last_reminder_at)) / 86400000;
-        if (daysSince < GAP_DAYS) continue;
+        if (daysSince < gap) continue;
       }
 
-      const { subject, note } = buildReminder(inv, inv.reminders_sent, overdue);
+      const level = inv.reminders_sent + (tier === 'Risky' ? 1 : 0);
+      const { subject, note } = buildReminder(inv, level, overdue);
       await sendReminder(inv.paypal_invoice_id, subject, note);
       await supabase.from('invoices').update({
         reminders_sent: inv.reminders_sent + 1,
         last_reminder_at: new Date().toISOString(),
       }).eq('id', inv.id);
-      await logEvent('reminder_sent', `${inv.paypal_invoice_id} (#${inv.reminders_sent + 1})`);
+        await logEvent('reminder_sent', `${inv.paypal_invoice_id} (#${inv.reminders_sent + 1}, payer tier ${tier})`);
       results.push(`${inv.paypal_invoice_id}: reminder #${inv.reminders_sent + 1}`);
     } catch (e) {
       console.error('Scheduler error on', inv.paypal_invoice_id, e.message);
