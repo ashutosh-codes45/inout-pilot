@@ -6,6 +6,7 @@ import { reconcilePayouts } from './payments.js';
 import { releaseWaitingForInvoice } from './payments.js';
 import { runAlerts } from './alerts.js';
 import { tierMap, keyOf } from './scores.js';
+import { draftReminder } from './reminders.js';
 
 const LEAD_DAYS = { Risky: 5, Watch: 3, Reliable: 1, New: 1 };
 
@@ -67,7 +68,9 @@ export async function runScheduler() {
       }
 
       const level = inv.reminders_sent + (tier === 'Risky' ? 1 : 0);
-      const { subject, note } = buildReminder(inv, level, overdue);
+      const tpl = buildReminder(inv, level, overdue);
+      const { subject, note } = await draftReminder(inv, level, overdue, tier, tpl);
+      console.log('Reminder:', subject, '|', note);
       await sendReminder(inv.paypal_invoice_id, subject, note);
       await supabase.from('invoices').update({
         reminders_sent: inv.reminders_sent + 1,
