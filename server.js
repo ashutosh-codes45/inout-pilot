@@ -14,6 +14,7 @@ import { computeScores } from './scores.js';
 const app = express();
 app.use(express.json());
 app.use('/vendor/ag-grid', express.static('node_modules/ag-grid-community'));
+app.use('/vendor/bryntum', express.static('node_modules/@bryntum/scheduler'));
 app.use(express.static('public')); // dashboard (data endpoints below need the key)
 
 // ---------- auth for everything except the PayPal webhook ----------
