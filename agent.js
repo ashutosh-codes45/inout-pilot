@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { issueInvoice } from './invoices.js';
 import { requestPayout } from './payments.js';
 import { logEvent } from './db.js';
+import { getStatus } from './status.js';
 
 // Free LLM via any OpenAI-compatible endpoint. Defaults to Groq's free tier.
 // To use OpenRouter instead: LLM_BASE_URL=https://openrouter.ai, LLM_MODEL=openai/gpt-oss-120b:free
@@ -39,6 +40,14 @@ const toolDefs = [
       required: ['supplier', 'amount'],
     },
   },
+       {
+       name: 'get_status',
+       description: 'Read-only. Use for questions about who owes the merchant money, what is overdue, which supplier payments are waiting, or what needs attention.',
+       input_schema: {
+         type: 'object',
+         properties: { focus: { type: 'string', enum: ['all', 'receivables', 'payables'] } },
+       },
+     },
   {
     name: 'ask_clarification',
     description: 'Use when the request is missing required details or is neither receiving nor paying money.',
@@ -82,6 +91,9 @@ const handlers = {
       supplierDueDate: i.supplier_due_date || null,
     });
   },
+       async get_status(i) {
+       return getStatus(['receivables', 'payables'].includes(i.focus) ? i.focus : 'all');
+     },
   async ask_clarification(i) {
     return { question: i.question };
   },
@@ -110,6 +122,7 @@ export async function handleMerchantRequest(message) {
           content:
             `You route a small merchant's requests. Today is ${today}. ` +
             `Receiving money -> create_invoice. Paying a supplier -> request_payout. ` +
+            `Questions about who owes money, what is overdue or waiting, or what needs attention -> get_status. ` +
             `If the merchant says to pay a supplier only after or when a client pays, set after_client_pays. ` +
             `If anything required is missing or ambiguous, call ask_clarification instead of guessing. ` +
             `Resolve relative dates ("in 2 weeks") to YYYY-MM-DD. ` +
