@@ -4,7 +4,6 @@
 Money in releases money out: the app collects from clients, and pays suppliers only after the linked client has paid, inside rules the merchant controls.
 
 > Built for the *Build What's Next with PayPal and AI* hackathon. Started Oct 17, 2026. PayPal **sandbox only**.
-> Demo video: **TODO: add YouTube link**
 
 ![Flow](docs/flow.svg)
 
