@@ -7,7 +7,11 @@
     "test:invoice": "node test.js"
   },
   "dependencies": {
+    "@bryntum/calendar": "npm:@bryntum/calendar-trial@^7.3.8",
+    "@bryntum/gantt": "npm:@bryntum/gantt-trial@^7.3.8",
     "@bryntum/scheduler": "npm:@bryntum/scheduler-trial@^7.3.8",
+    "@bryntum/schedulerpro": "npm:@bryntum/schedulerpro-trial@^7.3.8",
+    "@bryntum/taskboard": "npm:@bryntum/taskboard-trial@^7.3.8",
     "@supabase/supabase-js": "^2.45.0",
     "ag-grid-community": "^31.3.4",
     "dotenv": "^16.4.5",

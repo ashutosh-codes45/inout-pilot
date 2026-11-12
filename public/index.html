@@ -46,10 +46,22 @@
     <input id="key" type="password" placeholder="Admin key" autocomplete="off">
     <button id="connect" class="primary">Connect</button>
     <a href="/timeline.html"><button>Timeline</button></a>
+    <a href="/gantt.html"><button>Gantt</button></a>
+    <a href="/calendar.html"><button>Calendar</button></a>
+    <a href="/taskboard.html"><button>Taskboard</button></a>
     <button id="refresh">Refresh</button>
   </div>
 </header>
 <main>
+  <div class="kpi" style="margin-bottom:16px">
+  <div class="label">Ask InOut Pilot</div>
+  <div style="display:flex;gap:8px;margin-top:6px">
+    <input id="ask-text" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:6px;font:inherit" placeholder="e.g. Pay $20 to Singha Supplies once Gamma Co pays, supplier due 2026-11-15">
+    <button id="ask-go" class="primary">Send</button>
+    <button id="run-sched">Run daily check</button>
+  </div>
+  <div id="ask-out" style="margin-top:8px;white-space:pre-wrap"></div>
+</div>
   <div class="kpis">
     <div class="kpi"><div class="label">Expected in (unpaid invoices)</div><div class="value" id="k-in">-</div></div>
     <div class="kpi"><div class="label">Overdue invoices</div><div class="value" id="k-overdue">-</div></div>
@@ -242,6 +254,37 @@ async function refresh(quiet) {
     say(e.message === 'Unauthorized' ? 'Wrong admin key' : 'Load failed: ' + e.message, 'err');
   }
 }
+
+function describe(r) {
+  if (!r.ok) return 'Could not do that: ' + r.error;
+  const x = r.result || {};
+  if (r.action === 'create_invoice') return 'Invoice ' + x.invoiceId + ' sent. Pay link: ' + x.payLink;
+  if (r.action === 'request_payout') return 'Payout ' + x.decision + ' (' + x.status + '): ' + x.reason;
+  if (r.action === 'get_status') return x.summary;
+  if (r.action === 'ask_clarification') return x.question;
+  return JSON.stringify(x);
+}
+async function sendAsk() {
+  const message = $('ask-text').value.trim();
+  if (!message) return;
+  $('ask-out').textContent = 'Working...';
+  try {
+    const results = await api('/agent/request', { method: 'POST', body: JSON.stringify({ message }) });
+    $('ask-out').textContent = results.map(describe).join('\n');
+    $('ask-text').value = '';
+    refresh(true);
+  } catch (e) { $('ask-out').textContent = 'Failed: ' + e.message; }
+}
+$('ask-go').addEventListener('click', sendAsk);
+$('ask-text').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendAsk(); });
+$('run-sched').addEventListener('click', async () => {
+  $('ask-out').textContent = 'Running daily check...';
+  try {
+    const r = await api('/admin/run-scheduler');
+    $('ask-out').textContent = r.length ? r.join('\n') : 'Nothing needed attention.';
+    refresh(true);
+  } catch (e) { $('ask-out').textContent = 'Failed: ' + e.message; }
+});
 
 // ---------- wiring ----------
 state.tiers = new Map();

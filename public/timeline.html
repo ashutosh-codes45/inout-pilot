@@ -3,159 +3,165 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>InOut Pilot cash-flow timeline</title>
-<link rel="stylesheet" href="/vendor/bryntum/fontawesome/css/fontawesome.css">
-<link rel="stylesheet" href="/vendor/bryntum/fontawesome/css/solid.css">
-<link rel="stylesheet" href="/vendor/bryntum/scheduler.css">
-<link rel="stylesheet" href="/vendor/bryntum/svalbard-light.css" data-bryntum-theme>
+<title>InOut Pilot timeline</title>
+<link rel="stylesheet" href="/vendor/bryntum/schedulerpro/fontawesome/css/fontawesome.css">
+<link rel="stylesheet" href="/vendor/bryntum/schedulerpro/fontawesome/css/solid.css">
+<link rel="stylesheet" href="/vendor/bryntum/schedulerpro/schedulerpro.css">
+<link rel="stylesheet" href="/vendor/bryntum/schedulerpro/svalbard-light.css" data-bryntum-theme>
+<link rel="stylesheet" href="/bryntum/common.css">
 <style>
-  body { margin:0; font:14px/1.4 -apple-system,Segoe UI,Helvetica,Arial,sans-serif; background:#f6f5f1; color:#1f1f1c; }
-  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; padding:14px 20px; background:#fff; border-bottom:1px solid #e3e1da; }
-  h1 { font-size:18px; margin:0; font-weight:600; }
-  h1 small { font-weight:400; color:#6b6a65; margin-left:8px; }
-  a.btn { padding:6px 12px; border:1px solid #e3e1da; border-radius:6px; color:#1f1f1c; text-decoration:none; background:#fff; }
-  #legend { padding:10px 20px; color:#6b6a65; font-size:13px; }
-  #legend span { margin-right:16px; white-space:nowrap; }
-  .dot { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:middle; }
-  #msg { padding:0 20px; min-height:20px; font-size:13px; color:#a32d2d; }
-  #scheduler { height:calc(100vh - 150px); min-height:380px; margin:0 20px 20px; border:1px solid #e3e1da; border-radius:8px; overflow:hidden; }
+  #banner { display:none; gap:12px; align-items:center; padding:8px 12px; border:1px solid var(--red);
+            background:#fdf1f1; border-radius:8px; margin-bottom:8px; font-size:13px; }
+  #banner.on { display:flex; }
+  #banner button { padding:5px 10px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; font:inherit; color:var(--red); }
+  .conflict .b-sch-event { outline: 2px solid var(--red); outline-offset: -2px; }
 </style>
 </head>
 <body>
-<header>
-  <h1>InOut Pilot <small>cash-flow timeline: money in funds money out</small></h1>
-  <a class="btn" href="/">Back to dashboard</a>
-</header>
-<div id="legend">
-  <span><i class="dot" style="background:#7c5cff"></i>Invoice sent</span>
-  <span><i class="dot" style="background:#2e9d6e"></i>Paid / payout done</span>
-  <span><i class="dot" style="background:#e53935"></i>Overdue / failed / blocked</span>
-  <span><i class="dot" style="background:#f59e0b"></i>Payout waiting for a client</span>
-  <span>Arrows: the client invoice that releases a supplier payout</span>
-</div>
-<div id="msg"></div>
-<div id="scheduler"></div>
-
+<header><h1>InOut Pilot <small></small></h1><nav></nav></header>
+<main>
+  <div id="msg" class="msg"></div>
+  <div id="banner"><span id="banner-text"></span><button id="banner-btn">Draft extension</button></div>
+  <div class="legend">
+    <span><i class="dot" style="background:#534ab7"></i>Invoice sent</span>
+    <span><i class="dot" style="background:#0f6e56"></i>Paid</span>
+    <span><i class="dot" style="background:#a32d2d"></i>Overdue / failed</span>
+    <span><i class="dot" style="background:#f59e0b"></i>Payout waiting for a client</span>
+    <span>Drag an invoice bar sideways: its linked payout moves with it.</span>
+  </div>
+  <div id="view" class="view"></div>
+</main>
 <script type="module">
-const say = (t) => { document.getElementById('msg').textContent = t; };
-const key = sessionStorage.getItem('inout-key') || '';
-const money = (n) => '$' + Number(n || 0).toFixed(2);
+import { requireKey, loadAll, post, say, flash, takeFlash, mountNav, esc, money, day, addDays,
+         daysBetween, iso, colorOf, invoiceExpected, plannedDate, isConflict } from '/bryntum/common.js';
 
-const day = (v) => {
-  if (!v) return null;
-  const s = String(v);
-  if (s.length === 10) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
-  const t = new Date(s);
-  return new Date(t.getFullYear(), t.getMonth(), t.getDate());
-};
-const plusDays = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
-const rid = (kind, name) => kind + ':' + String(name || '?').trim().toLowerCase();
+mountNav('/timeline.html', 'timeline: money in releases money out');
 
-async function api(path) {
-  const res = await fetch(path, { headers: { 'x-api-key': key } });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || 'HTTP ' + res.status);
-  return body;
-}
-
-async function checkAssets() {
-  const files = ['scheduler.module.js', 'scheduler.css', 'svalbard-light.css', 'fontawesome/css/fontawesome.css'];
-  const bad = [];
-  for (const f of files) {
-    const r = await fetch('/vendor/bryntum/' + f, { method: 'HEAD' }).catch(() => ({ ok: false }));
-    if (!r.ok) bad.push(f);
-  }
-  return bad;
-}
-
-function buildData(invoices, payments, scores) {
-  const tiers = new Map(scores.map((s) => [String(s.client_name).trim().toLowerCase(), s.tier]));
+function build(invoices, payments) {
+  const invById = new Map(invoices.map((i) => [String(i.id), i]));
   const resources = [];
   const seen = new Set();
-  const addRes = (kind, name, extra = {}) => {
-    const id = rid(kind, name);
-    if (seen.has(id)) return id;
-    seen.add(id);
-    resources.push({ id, name: (kind === 'c' ? 'Client: ' : 'Supplier: ') + name, ...extra });
+  const res = (kind, name) => {
+    const id = kind + ':' + String(name || '?').trim().toLowerCase();
+    if (!seen.has(id)) { seen.add(id); resources.push({ id, name: String(name || '?') + ' - ' + kind }); }
     return id;
   };
 
   const events = [];
-  const invoiceById = new Map(invoices.map((i) => [i.id, i]));
-
   for (const i of invoices) {
-    const resourceId = addRes('c', i.client_name, { tier: tiers.get(String(i.client_name).trim().toLowerCase()) || 'New' });
-    const start = day(i.created_at) || day(i.due_date);
-    const due = day(i.due_date) || start;
-    const end = plusDays(due > start ? due : start, 1);
-    const color = i.status === 'PAID' ? 'green' : i.status === 'OVERDUE' ? 'red' : 'violet';
+    const start = day(i.created_at) || invoiceExpected(i);
+    const end = invoiceExpected(i);
+    if (!start || !end) continue;
     events.push({
-      id: 'inv:' + i.id, resourceId, startDate: start, endDate: end, eventColor: color,
-      name: money(i.amount) + (i.status === 'PAID' ? ' paid' : i.status === 'OVERDUE' ? ' OVERDUE' : ' due ' + i.due_date),
+      id: 'inv:' + i.id, resourceId: res('client', i.client_name),
+      name: i.client_name + ' \u00b7 ' + money(i.amount),
+      startDate: start, endDate: end > start ? end : addDays(start, 1),
+      eventColor: colorOf(i.status), draggable: i.status !== 'PAID', resizable: false,
+    });
+  }
+  for (const p of payments) {
+    const start = plannedDate(p, invById);
+    if (!start) continue;
+    events.push({
+      id: 'pay:' + p.id, resourceId: res('supplier', p.supplier_name),
+      name: p.supplier_name + ' \u00b7 ' + money(p.amount),
+      startDate: start, endDate: addDays(start, 1),
+      eventColor: colorOf(p.status), cls: isConflict(p, invById) ? 'conflict' : '',
+      draggable: false, resizable: false,
     });
   }
 
-  const deps = [];
+  const ids = new Set(events.map((e) => e.id));
+  const dependencies = [];
   for (const p of payments) {
-    if (['CANCELLED'].includes(p.status)) continue;
-    const resourceId = addRes('s', p.supplier_name);
-    const start = day(p.created_at);
-    const due = day(p.due_date) || start;
-    const end = plusDays(due > start ? due : start, 1);
-    const color = p.status === 'SUCCESS' ? 'green'
-      : ['FAILED', 'BLOCKED', 'REJECTED'].includes(p.status) ? 'red'
-      : ['WAITING_FOR_CLIENT', 'PENDING_APPROVAL'].includes(p.status) ? 'orange' : 'violet';
-    const label = p.status === 'WAITING_FOR_CLIENT' ? 'waiting for client'
-      : p.status === 'PENDING_APPROVAL' ? 'needs your approval' : p.status.toLowerCase();
-    events.push({ id: 'pay:' + p.id, resourceId, startDate: start, endDate: end, eventColor: color,
-      name: money(p.amount) + ' ' + label + (p.alerted_at ? ' (alert)' : '') });
-    if (p.linked_invoice_id && invoiceById.has(p.linked_invoice_id)) {
-      deps.push({ id: 'dep:' + p.id, from: 'inv:' + p.linked_invoice_id, to: 'pay:' + p.id, type: 2 });
-    }
+    const inv = invById.get(String(p.linked_invoice_id));
+    if (!inv || !ids.has('inv:' + inv.id) || !ids.has('pay:' + p.id)) continue;
+    const expected = invoiceExpected(inv);
+    const planned = plannedDate(p, invById);
+    if (!expected || !planned) continue;
+    dependencies.push({ id: 'dep:' + p.id, from: 'inv:' + inv.id, to: 'pay:' + p.id, type: 2,
+                        lag: daysBetween(planned, expected), lagUnit: 'day' });
   }
-  resources.sort((a, b) => a.id.localeCompare(b.id)); // clients first, then suppliers
-  return { resources, events, deps };
+  return { resources, events, dependencies };
+}
+
+function showBanner(invoices, payments) {
+  const invById = new Map(invoices.map((i) => [String(i.id), i]));
+  const bad = payments.filter((p) => p.status === 'WAITING_FOR_CLIENT' && isConflict(p, invById));
+  if (!bad.length) return;
+  const p = bad[0];
+  const inv = invById.get(String(p.linked_invoice_id));
+  const planned = plannedDate(p, invById);
+  const due = day(p.due_date);
+  const late = planned && due ? daysBetween(planned, due) : 0;
+  if (!(late > 0)) return;
+  const expected = inv ? invoiceExpected(inv) : null;
+  const extra = expected ? daysBetween(planned, expected) : 0;
+  const lead = extra > 0 ? (inv ? inv.client_name : p.supplier_name) + ' +' + extra + ' days: ' : '';
+  document.getElementById('banner-text').textContent =
+    lead + p.supplier_name + ' payout now ' + iso(planned) + ', ' + late +
+    ' days after its supplier due date' +
+    (bad.length > 1 ? ' (and ' + (bad.length - 1) + ' more)' : '');
+  document.getElementById('banner').classList.add('on');
+  document.getElementById('banner-btn').onclick = async () => {
+    try {
+      await post('/payments/' + p.id + '/extension', {});
+      flash('Extension drafted for ' + p.supplier_name, 'ok');
+      location.reload();
+    } catch (e) { say('Could not draft the extension: ' + e.message, 'err'); }
+  };
 }
 
 async function main() {
-  if (!key) return say('No admin key found. Open the dashboard, enter your key and press Connect, then reopen this page.');
-  const bad = await checkAssets();
-  if (bad.length) return say('Missing Bryntum files in /vendor/bryntum: ' + bad.join(', ') + '. Run: dir node_modules\\@bryntum\\scheduler and send me the list.');
+  const f = takeFlash();
+  if (f) say(f.text, f.cls);
+  if (!requireKey()) return;
 
-  let Scheduler;
-  try { ({ Scheduler } = await import('/vendor/bryntum/scheduler.module.js')); }
-  catch (e) { return say('Could not load Bryntum: ' + e.message); }
+  let SchedulerPro, data;
+  try { ({ SchedulerPro } = await import('/vendor/bryntum/schedulerpro/schedulerpro.module.js')); }
+  catch (e) { return say('Could not load Bryntum Scheduler Pro: ' + e.message, 'err'); }
+  try { data = await loadAll(); }
+  catch (e) { return say('Could not load data: ' + e.message, 'err'); }
 
-  let data, scores;
-  try { [data, scores] = await Promise.all([api('/api/overview'), api('/api/scores')]); }
-  catch (e) { return say('Could not load data: ' + e.message); }
+  const { resources, events, dependencies } = build(data.invoices, data.payments);
+  showBanner(data.invoices, data.payments);
 
-  const { resources, events, deps } = buildData(data.invoices, data.payments, scores);
-  const all = events.flatMap((e) => [e.startDate, e.endDate]);
-  const today = new Date();
-  const start = plusDays(new Date(Math.min(today.getTime(), ...all.map((d) => d.getTime()))), -3);
-  const end = plusDays(new Date(Math.max(plusDays(today, 14).getTime(), ...all.map((d) => d.getTime()))), 3);
+  const times = events.flatMap((e) => [e.startDate.getTime(), e.endDate.getTime()]).concat(Date.now());
+  const start = addDays(new Date(Math.min(...times)), -7);
+  const end = addDays(new Date(Math.max(...times)), 14);
 
-  new Scheduler({
-    appendTo: 'scheduler',
-    startDate: start,
-    endDate: end,
-    viewPreset: 'dayAndWeek',
-    rowHeight: 48,
-    barMargin: 6,
-    readOnly: true, // the database is the source of truth; actions live on the dashboard
-    columns: [
-      { text: 'Account', field: 'name', width: 210 },
-      { text: 'Payer tier', width: 100, renderer: ({ record }) => (record.data.tier || '') },
-    ],
+  const scheduler = new SchedulerPro({
+    appendTo: 'view',
+    startDate: start, endDate: end,
+    visibleDate: { date: new Date(), block: 'center' },
+    viewPreset: 'dayAndWeek', rowHeight: 44, barMargin: 6,
+    columns: [{ text: 'Payer / Supplier', field: 'name', width: 240 }],
     features: {
       dependencies: true,
       timeRanges: { showCurrentTimeLine: true },
+      eventDrag: { constrainDragToResource: true },
+      eventResize: false,
     },
-    resources,
-    events,
-    dependencies: deps,
+    eventRenderer: ({ eventRecord }) => esc(eventRecord.name),
+    resources, events, dependencies,
+    beforeEventDropFinalize({ context }) {
+      const id = String(context.eventRecord.id).replace('inv:', '');
+      const moved = iso(context.endDate);
+      if (moved === iso(context.eventRecord.endDate)) { context.finalize(false); return; }
+      context.async = true;
+      (async () => {
+        try {
+          await post('/api/invoices/' + encodeURIComponent(id) + '/shift', { expected_pay_date: moved });
+          flash('Expected pay date moved to ' + moved + '. Payouts waiting on this invoice moved too.', 'ok');
+          location.reload();
+        } catch (e) {
+          say('Could not move the invoice: ' + e.message, 'err');
+          context.finalize(false);
+        }
+      })();
+    },
   });
+  scheduler.scrollToDate(new Date(), { block: 'center' });
   say('');
 }
 main();

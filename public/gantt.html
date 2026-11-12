@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InOut Pilot gantt</title>
+<link rel="stylesheet" href="/vendor/bryntum/gantt/fontawesome/css/fontawesome.css">
+<link rel="stylesheet" href="/vendor/bryntum/gantt/fontawesome/css/solid.css">
+<link rel="stylesheet" href="/vendor/bryntum/gantt/gantt.css">
+<link rel="stylesheet" href="/vendor/bryntum/gantt/svalbard-light.css" data-bryntum-theme>
+<link rel="stylesheet" href="/bryntum/common.css">
+<style>
+  .legend { padding-bottom: 8px; }
+  .bar-text { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+</style>
+</head>
+<body>
+<header><h1>InOut Pilot <small></small></h1><nav></nav></header>
+<main>
+  <div id="msg" class="msg"></div>
+  <div class="legend">
+    <span><i class="dot" style="background:#534ab7"></i>Invoice sent</span>
+    <span><i class="dot" style="background:#0f6e56"></i>Paid</span>
+    <span><i class="dot" style="background:#a32d2d"></i>Overdue</span>
+    <span><i class="dot" style="background:#f59e0b"></i>Payout waiting for a client</span>
+    <span>Read-only. Arrows: the invoice that releases each supplier payout. Hover a bar for details.</span>
+  </div>
+  <div id="view" class="view"></div>
+</main>
+<script type="module">
+import { requireKey, loadAll, say, takeFlash, mountNav, money, day, addDays, daysBetween,
+         colorOf, invoiceExpected, plannedDate } from '/bryntum/common.js';
+
+mountNav('/gantt.html', 'gantt: who pays whom, and when');
+
+const groups = (rows, key) => {
+  const m = new Map();
+  for (const r of rows) {
+    const k = String(r[key] || '?');
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(r);
+  }
+  return m;
+};
+
+function build(invoices, payments) {
+  const invById = new Map(invoices.map((i) => [String(i.id), i]));
+  const tasks = [];
+  const leaf = new Map();       // task id -> { start, end } for the parent rollup
+  const span = (id, start, end) => leaf.set(id, { start, end });
+
+  for (const [client, list] of groups(invoices, 'client_name')) {
+    const children = [];
+    for (const i of list) {
+      const start = day(i.created_at) || invoiceExpected(i);
+      const end = invoiceExpected(i);
+      if (!start || !end) continue;
+      const id = 'inv:' + i.id;
+      const t = { id, name: i.client_name + ' \u00b7 ' + money(i.amount),
+                  note: i.client_name + ' \u00b7 ' + money(i.amount) + ' \u00b7 ' + i.status,
+                  amt: money(i.amount),
+                  startDate: start,
+                  endDate: end > start ? end : addDays(start, 1), manuallyScheduled: true,
+                  percentDone: i.status === 'PAID' ? 100 : 0,
+                  eventColor: i.status === 'OVERDUE' ? 'red' : (i.status === 'PAID' ? 'green' : 'violet') };
+      children.push(t);
+      span(id, t.startDate, t.endDate);
+    }
+    if (children.length) tasks.push({ id: 'payer:' + client.toLowerCase(), name: client, expanded: true,
+                                      manuallyScheduled: true, children });
+  }
+
+  for (const [supplier, list] of groups(payments, 'supplier_name')) {
+    const children = [];
+    for (const p of list) {
+      const start = plannedDate(p, invById);
+      if (!start) continue;
+      const id = 'pay:' + p.id;
+      const t = { id, name: p.supplier_name + ' \u00b7 ' + money(p.amount),
+                  note: p.supplier_name + ' \u00b7 ' + money(p.amount) + ' \u00b7 ' + p.status,
+                  amt: money(p.amount),
+                  startDate: start,
+                  endDate: addDays(start, 1), manuallyScheduled: true, eventColor: colorOf(p.status) };
+      children.push(t);
+      span(id, t.startDate, t.endDate);
+    }
+    if (children.length) tasks.push({ id: 'supplier:' + supplier.toLowerCase(), name: supplier, expanded: true,
+                                      manuallyScheduled: true, children });
+  }
+
+  // Summary bars carry the min/max of their children, so nothing depends on the engine.
+  for (const t of tasks) {
+    const kids = (t.children || []).map((c) => leaf.get(c.id)).filter(Boolean);
+    if (!kids.length) continue;
+    t.startDate = new Date(Math.min(...kids.map((k) => k.start.getTime())));
+    t.endDate = new Date(Math.max(...kids.map((k) => k.end.getTime())));
+  }
+
+  // Predecessor dates are resolved after every leaf exists.
+  const known = new Set(leaf.keys());
+  const dependencies = [];
+  for (const p of payments) {
+    const inv = invById.get(String(p.linked_invoice_id));
+    if (!inv || !known.has('inv:' + inv.id) || !known.has('pay:' + p.id)) continue;
+    const expected = invoiceExpected(inv);
+    const planned = plannedDate(p, invById);
+    if (!expected || !planned) continue;
+    dependencies.push({ id: 'dep:' + p.id, from: 'inv:' + inv.id, to: 'pay:' + p.id, type: 2,
+                        lag: daysBetween(planned, expected), lagUnit: 'day' });
+  }
+  return { tasks, dependencies };
+}
+
+async function main() {
+  const f = takeFlash();
+  if (f) say(f.text, f.cls);
+  if (!requireKey()) return;
+
+  let Gantt, data;
+  try { ({ Gantt } = await import('/vendor/bryntum/gantt/gantt.module.js')); }
+  catch (e) { return say('Could not load Bryntum Gantt: ' + e.message, 'err'); }
+  try { data = await loadAll(); }
+  catch (e) { return say('Could not load data: ' + e.message, 'err'); }
+
+  const { tasks, dependencies } = build(data.invoices, data.payments);
+
+  new Gantt({
+    appendTo: 'view',
+    readOnly: true,
+    viewPreset: 'weekAndDay',
+    rowHeight: 32,
+    barMargin: 5,
+    project: { tasks, dependencies },
+    columns: [
+      { type: 'name', text: 'Payer / Supplier', width: 260 },
+      { type: 'startdate', text: 'From', width: 160 },
+      { type: 'enddate', text: 'Expected / planned', width: 200 },
+      { type: 'percentdone', text: 'Done', width: 80 },
+    ],
+    features: {
+      dependencies: true,
+    },
+    // Text goes inside the bar. Short bars (2 days or less) show only the amount; hover shows the rest.
+    // A DomConfig is used so database values are never parsed as HTML.
+    taskRenderer({ taskRecord }) {
+      if (!taskRecord.isLeaf) return undefined;
+      const short = (taskRecord.duration || 0) <= 2;
+      const text = short ? taskRecord.data.amt : taskRecord.data.note;
+      return { tag: 'span', class: 'bar-text', text: String(text ?? '') };
+    },
+  });
+  say('');
+}
+main();
+</script>
+</body>
+</html>

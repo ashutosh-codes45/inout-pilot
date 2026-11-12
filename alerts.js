@@ -6,7 +6,7 @@ const MODEL = process.env.LLM_MODEL ?? 'openai/gpt-oss-120b';
 
 const plural = (n) => `${n} day${n === 1 ? '' : 's'}`;
 
-async function draftExtension(p, daysLeft) {
+export async function draftExtension(p, daysLeft) {
   const when = daysLeft < 0 ? `${plural(-daysLeft)} ago` : `on ${p.due_date}`;
   const fallback =
     `Hi ${p.supplier_name}, a customer payment we were counting on is delayed. ` +

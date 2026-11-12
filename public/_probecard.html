@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>cardprobe</title>
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/fontawesome/css/fontawesome.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/fontawesome/css/solid.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/taskboard.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/svalbard-light.css" data-bryntum-theme>
+<style>html,body{margin:0;height:100%} #view{height:600px}</style>
+</head>
+<body>
+<pre id="out" style="max-height:200px;overflow:auto"></pre>
+<div id="view"></div>
+<script type="module">
+import { TaskBoard } from '/vendor/bryntum/taskboard/taskboard.module.js';
+const log = (s) => { document.getElementById('out').textContent += '\n' + s; };
+const cols = [{ id: 'waiting', text: 'Waiting' }, { id: 'blocked', text: 'Blocked' }];
+const tasks = [{ id: 'p:1', status: 'waiting', name: 'One' }, { id: 'p:2', status: 'blocked', name: 'Two' }];
+let once = false;
+const tb = new TaskBoard({
+  appendTo: 'view', columns: cols, columnField: 'status', tasks,
+  taskRenderer({ taskRecord, cardConfig }) {
+    if (!once) {
+      once = true;
+      log('TASKRECORD keys: ' + Object.keys(taskRecord).join(','));
+      log('CARD top keys: ' + Object.keys(cardConfig).join(','));
+      const dump = (o, depth, prefix) => {
+        if (depth > 3 || !o) return;
+        if (Array.isArray(o)) { log(prefix + '[array len ' + o.length + ']'); o.slice(0, 5).forEach((v, i) => dump(v, depth + 1, prefix + '  [' + i + ']')); return; }
+        if (typeof o !== 'object') { log(prefix + String(o).slice(0, 60)); return; }
+        log(prefix + '{' + Object.keys(o).join(',') + '}');
+        for (const k of Object.keys(o)) if (k !== 'children') dump(o[k], depth + 1, prefix + '  .' + k + ' ');
+        if (o.children && depth < 3) dump(o.children, depth + 1, prefix + '  .children ');
+      };
+      dump(cardConfig, 0, 'DOM ');
+    }
+  },
+});
+setTimeout(() => {
+  log('cards=' + document.querySelectorAll('.b-taskboard-card').length + ' store=' + tb.taskStore.count);
+  log('cardText=' + [...document.querySelectorAll('.b-taskboard-card')].map((n) => n.textContent.replace(/\s+/g, ' ').trim()).join(' || '));
+  log('DONE');
+}, 1200);
+</script>
+</body>
+</html>

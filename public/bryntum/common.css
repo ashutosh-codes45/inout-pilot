@@ -1,0 +1,32 @@
+:root { --bg:#f6f5f1; --card:#fff; --ink:#1f1f1c; --muted:#6b6a65; --line:#e3e1da; --teal:#0f6e56; --red:#a32d2d; }
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; display: flex; flex-direction: column; background: var(--bg); color: var(--ink);
+  font: 14px/1.4 -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+header {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;
+  padding: 12px 20px; background: var(--card); border-bottom: 1px solid var(--line);
+}
+h1 { font-size: 18px; margin: 0; font-weight: 600; }
+h1 small { font-weight: 400; color: var(--muted); margin-left: 8px; }
+nav { display: flex; gap: 6px; flex-wrap: wrap; }
+.navbtn { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--ink); text-decoration: none; }
+.navbtn:hover { background: #f0eee8; }
+.navbtn.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+main { flex: 1 1 auto; min-height: 0; padding: 12px 20px 18px; display: flex; flex-direction: column; }
+.view { flex: 1 1 auto; min-height: 340px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.msg { min-height: 18px; font-size: 13px; color: var(--muted); }
+.msg.err { color: var(--red); }
+.msg.ok { color: var(--teal); }
+.legend { color: var(--muted); font-size: 13px; padding-bottom: 8px; }
+.legend span { margin-right: 16px; white-space: nowrap; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.tb-badge { display: inline-block; margin-top: 6px; padding: 1px 6px; border-radius: 999px; background: var(--red); color: #fff; font-size: 11px; }
+.toolbar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding-bottom: 8px; }
+.toolbar select, .toolbar button { padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); font: inherit; color: var(--ink); }
+.toolbar button:hover { background: #f0eee8; }
+dialog { border: 1px solid var(--line); border-radius: 12px; max-width: 560px; width: 92%; }
+dialog h3 { margin: 0 0 8px; font-size: 16px; }
+dialog textarea { width: 100%; height: 170px; font: inherit; padding: 8px; }

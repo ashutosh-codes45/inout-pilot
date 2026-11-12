@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>calprobe</title>
+<link rel="stylesheet" href="/vendor/bryntum/calendar/fontawesome/css/fontawesome.css">
+<link rel="stylesheet" href="/vendor/bryntum/calendar/fontawesome/css/solid.css">
+<link rel="stylesheet" href="/vendor/bryntum/calendar/calendar.css">
+<link rel="stylesheet" href="/vendor/bryntum/calendar/svalbard-light.css" data-bryntum-theme>
+<style>html,body{margin:0} .h{height:520px;border:1px solid #333;margin:4px}</style>
+</head>
+<body>
+<pre id="out">start</pre>
+<div id="a" class="h"></div>
+<div id="b" class="h"></div>
+<div id="c" class="h"></div>
+<script type="module">
+import { Calendar } from '/vendor/bryntum/calendar/calendar.module.js';
+const log = (s) => { document.getElementById('out').textContent += '\n' + s; };
+const d0 = new Date(2026, 10, 12);
+const ev = (id, extra) => Object.assign({ id, name: '$50.00 \u00b7 Acme', startDate: d0, allDay: true, eventColor: 'violet' }, extra);
+
+const a = new Calendar({ appendTo: 'a', date: new Date(), mode: 'month', eventRenderer: ({ eventRecord }) => String(eventRecord.name) });
+a.eventStore.loadData([ev('a1', {})]);
+const b = new Calendar({ appendTo: 'b', date: new Date(), mode: 'month', eventRenderer: ({ eventRecord }) => String(eventRecord.name) });
+b.eventStore.loadData([ev('b1', { endDate: new Date(2026, 10, 13) })]);
+const c = new Calendar({ appendTo: 'c', date: new Date(), mode: 'month' });
+c.eventStore.loadData([ev('c1', {})]);
+setTimeout(() => {
+  const n = (s) => document.querySelectorAll(s).length;
+  log('A(no endDate) store=' + a.eventStore.count + ' mode=' + a.mode + ' ev=' + n('#a .b-cal-event'));
+  log('B(endDate) store=' + b.eventStore.count + ' mode=' + b.mode + ' ev=' + n('#b .b-cal-event'));
+  log('C(no renderer) store=' + c.eventStore.count + ' mode=' + c.mode + ' ev=' + n('#c .b-cal-event'));
+  log('A cells=' + n('#a .b-cal-day') + ' A text=' + (document.querySelector('#a') ? document.querySelector('#a').textContent.replace(/\s+/g, ' ').slice(0, 120) : '-'));
+  log('C text=' + (document.querySelector('#c') ? document.querySelector('#c').textContent.replace(/\s+/g, ' ').slice(0, 120) : '-'));
+  log('DONE');
+}, 1500);
+</script>
+</body>
+</html>

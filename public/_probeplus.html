@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>plusprobe</title>
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/fontawesome/css/fontawesome.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/fontawesome/css/solid.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/taskboard.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/svalbard-light.css" data-bryntum-theme>
+<style>html,body{margin:0;height:100%} #view{height:500px}</style>
+</head>
+<body>
+<pre id="out" style="max-height:260px;overflow:auto">start</pre>
+<div id="view"></div>
+<script type="module">
+import { TaskBoard } from '/vendor/bryntum/taskboard/taskboard.module.js';
+const log = (s) => { document.getElementById('out').textContent += '\n' + s; };
+const tb = new TaskBoard({
+  appendTo: 'view',
+  columns: [{ id: 'waiting', text: 'Waiting' }],
+  columnField: 'status',
+  tasks: [{ id: 'p:1', status: 'waiting', name: 'One' }],
+  features: { taskEdit: false },
+});
+setTimeout(() => {
+  const bbar = document.querySelector('.b-task-board-column-bbar');
+  log('BBAR=' + (bbar ? bbar.outerHTML.replace(/\s+/g, ' ').slice(0, 700) : 'none'));
+  log('PLUS=' + [...document.querySelectorAll('#view button')].map((b) => (b.className + '|' + (b.dataset.ref || '') + '|' + b.getAttribute('aria-label') + '|' + b.textContent.trim())).join(' ;; '));
+  log('FEATUREREFS=' + Object.keys(tb.features).join(','));
+  log('DONE');
+}, 1200);
+</script>
+</body>
+</html>

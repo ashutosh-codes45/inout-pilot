@@ -23,8 +23,10 @@ export function scoreClient(invs, today = new Date().toISOString().slice(0, 10))
   score = Math.max(0, Math.round(score));
 
     const enough = paid.length >= 3;
-  let tier = !enough ? 'New' : score >= 80 ? 'Reliable' : score >= 50 ? 'Watch' : 'Risky';
-  if (overdueOpen > 0 && tier !== 'Risky') tier = 'Watch'; // an overdue invoice is never "Reliable" or "New"
+  let tier = score < 50 ? 'Risky' : !enough ? 'New' : score >= 80 ? 'Reliable' : 'Watch';
+  if (overdueOpen > 0 && (tier === 'Reliable' || tier === 'New')) tier = 'Watch'; // an overdue invoice is never "Reliable" or "New"
+
+
 
   const bits = [];
   if (paid.length) bits.push(`${lateCount} of ${paid.length} paid invoices were late` + (lateCount ? ` (avg ${avgLate.toFixed(1)} days late)` : ''));

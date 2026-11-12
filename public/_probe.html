@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>probe</title></head>
+<body>
+<pre id="out">start</pre>
+<div id="hosts"></div>
+<script>
+sessionStorage.setItem('inout-key', 'f7c681765af4bbfe9b2b7948f5d88d66b876453c9a6b8f4efeaaa73c25e95d75');
+const el = document.getElementById('out');
+const log = (s) => { el.textContent += '\n' + s; };
+
+const f = document.createElement('iframe');
+f.src = '/timeline.html';
+f.width = 12000; f.height = 900;
+f.onload = () => setTimeout(() => {
+  const d = f.contentDocument;
+  const q = (s) => d.querySelectorAll(s).length;
+  const names = (s) => [...d.querySelectorAll(s)].map((n) => n.textContent.replace(/\s+/g, ' ').trim());
+  log('WIDE rows=' + q('.b-grid-row') + ' ev=' + q('.b-sch-event') + ' dep=' + q('.b-sch-dependency')
+      + ' arrow=' + q('.b-sch-dependency-arrow') + ' paths=' + q('#view svg path'));
+  log('resources: ' + names('.b-grid-row .b-grid-cell').filter((x, i) => i % 4 === 0).join(' | ').slice(0, 900));
+  log('events: ' + names('.b-sch-event').join(' | ').slice(0, 900));
+  log('header: ' + names('.b-sch-header-text').join(' / ').slice(0, 300));
+}, 4000);
+document.getElementById('hosts').appendChild(f);
+</script>
+</body>
+</html>

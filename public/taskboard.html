@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InOut Pilot taskboard</title>
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/fontawesome/css/fontawesome.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/fontawesome/css/solid.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/taskboard.css">
+<link rel="stylesheet" href="/vendor/bryntum/taskboard/svalbard-light.css" data-bryntum-theme>
+<link rel="stylesheet" href="/bryntum/common.css">
+<style>
+  .tb-detail { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+  .tb-detail .tb-head { font-weight: 600; font-size: 13px; }
+  .tb-detail .tb-muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<header><h1>InOut Pilot <small></small></h1><nav></nav></header>
+<main>
+  <div id="msg" class="msg"></div>
+  <div class="legend">
+    <span>Drag a card to act: <b>Needs approval &rarr; Processing</b> approves, &rarr; <b>Blocked</b> rejects,
+      <b>Waiting &rarr; Processing</b> pays now. Every other move is refused.</span>
+  </div>
+  <div id="view" class="view"></div>
+</main>
+<script type="module">
+import { requireKey, loadAll, post, say, flash, takeFlash, mountNav, money, iso,
+         colorOf, plannedDate, isConflict } from '/bryntum/common.js';
+
+mountNav('/taskboard.html', 'taskboard: supplier payouts by stage');
+
+const COLUMNS = [
+  { id: 'waiting', text: 'Waiting for client' },
+  { id: 'approval', text: 'Needs approval' },
+  { id: 'processing', text: 'Processing' },
+  { id: 'paid', text: 'Paid' },
+  { id: 'blocked', text: 'Blocked / Failed' },
+];
+const COLUMN_OF = {
+  WAITING_FOR_CLIENT: 'waiting', PENDING_APPROVAL: 'approval', PROCESSING: 'processing', SUCCESS: 'paid',
+  FAILED: 'blocked', BLOCKED: 'blocked', REJECTED: 'blocked', CANCELLED: 'blocked',
+};
+const MOVES = {
+  'approval>processing': { ask: 'Approve this payout and start processing?', url: '/approve' },
+  'approval>blocked': { ask: 'Reject this payout?', url: '/reject' },
+  'waiting>processing': { ask: 'Pay this supplier now?', url: '/pay-now' },
+};
+
+const info = new Map();
+
+function build(payments, invoices) {
+  const invById = new Map(invoices.map((i) => [String(i.id), i]));
+  const tasks = [];
+  for (const p of payments) {
+    const id = 'p:' + p.id;
+    const inv = invById.get(String(p.linked_invoice_id));
+    const planned = plannedDate(p, invById);
+    const active = ['WAITING_FOR_CLIENT', 'PENDING_APPROVAL'].includes(p.status);
+    info.set(id, {
+      active,
+      client: inv ? String(inv.client_name || '?') : null,
+      planned: planned ? iso(planned) : '-',
+      conflict: active && isConflict(p, invById), // finished payouts are never flagged
+    });
+    tasks.push({
+      id, name: String(p.supplier_name || '?') + ' \u00b7 ' + money(p.amount),
+      status: COLUMN_OF[p.status] || 'blocked', eventColor: colorOf(p.status),
+    });
+  }
+  return tasks;
+}
+
+async function main() {
+  const f = takeFlash();
+  if (f) say(f.text, f.cls);
+  if (!requireKey()) return;
+
+  let TaskBoard, data;
+  try { ({ TaskBoard } = await import('/vendor/bryntum/taskboard/taskboard.module.js')); }
+  catch (e) { return say('Could not load Bryntum TaskBoard: ' + e.message, 'err'); }
+  try { data = await loadAll(); }
+  catch (e) { return say('Could not load data: ' + e.message, 'err'); }
+
+  const tasks = build(data.payments, data.invoices);
+
+  const board = new TaskBoard({
+    appendTo: 'view',
+    columns: COLUMNS,
+    columnField: 'status',
+    // Tasks belong inside the project; a top-level `tasks` config left every column empty.
+    project: { tasks },
+    features: {
+      taskEdit: false,
+      columnToolbars: false, // removes the "+" add-card buttons
+    },
+    taskRenderer({ taskRecord, cardConfig }) {
+      const v = info.get(String(taskRecord.id));
+      if (!v || !cardConfig.children || !cardConfig.children.body) return;
+      const children = [];
+      if (v.active) {
+        children.push({ tag: 'div', class: 'tb-muted', text: v.client ? 'waiting on ' + v.client : 'not linked to a client invoice' });
+      }
+      children.push({ tag: 'div', class: 'tb-muted', text: 'planned ' + v.planned });
+      if (v.conflict) children.push({ tag: 'div', class: 'tb-badge', text: 'Past supplier due date' });
+      cardConfig.children.body.children.detail = { tag: 'div', class: 'tb-detail', children };
+    },
+    beforeTaskDrop({ taskRecords, targetColumn }) {
+      const task = taskRecords && taskRecords[0];
+      if (!task || !targetColumn) return false;
+      const from = task.status;
+      const to = targetColumn.id;
+      if (from === to) return true;
+      const move = MOVES[from + '>' + to];
+      if (!move) { say('That move is not allowed.', 'err'); return false; }
+      if (!confirm(move.ask)) return false;
+      const id = String(task.id).replace('p:', '');
+      return (async () => {
+        try {
+          await post('/payments/' + encodeURIComponent(id) + move.url, {});
+          flash('Done: ' + move.ask, 'ok');
+          location.reload();
+          return false;
+        } catch (e) {
+          say('Could not do that: ' + e.message, 'err');
+          return false;
+        }
+      })();
+    },
+  });
+
+  const n = board.project.taskStore.count;
+  console.info('[taskboard] cards', n);
+  say(n + ' payout' + (n === 1 ? '' : 's') + ' on the board.');
+}
+main();
+</script>
+</body>
+</html>

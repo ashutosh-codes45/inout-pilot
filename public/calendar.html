@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InOut Pilot calendar</title>
+<link rel="stylesheet" href="/vendor/bryntum/calendar/fontawesome/css/fontawesome.css">
+<link rel="stylesheet" href="/vendor/bryntum/calendar/fontawesome/css/solid.css">
+<link rel="stylesheet" href="/vendor/bryntum/calendar/calendar.css">
+<link rel="stylesheet" href="/vendor/bryntum/calendar/svalbard-light.css" data-bryntum-theme>
+<link rel="stylesheet" href="/bryntum/common.css">
+</head>
+<body>
+<header><h1>InOut Pilot <small></small></h1><nav></nav></header>
+<main>
+  <div id="msg" class="msg"></div>
+  <div class="toolbar">
+    <label>Show
+      <select id="kind">
+        <option value="both">Pay-ins and payouts</option>
+        <option value="payin">Pay-ins only</option>
+        <option value="payout">Payouts only</option>
+      </select>
+    </label>
+    <label>Payer
+      <select id="payer"><option value="all">Everyone</option></select>
+    </label>
+    <span class="legend" style="padding:0">
+      <span><i class="dot" style="background:#534ab7"></i>Pay-in (invoice expected)</span>
+      <span><i class="dot" style="background:#f59e0b"></i>Payout (supplier planned)</span>
+    </span>
+  </div>
+  <div id="view" class="view"></div>
+</main>
+<script type="module">
+import { requireKey, loadAll, say, takeFlash, mountNav, money, addDays,
+         invoiceExpected, plannedDate } from '/bryntum/common.js';
+
+mountNav('/calendar.html', 'calendar: cash in and cash out by date');
+
+function build(invoices, payments) {
+  const invById = new Map(invoices.map((i) => [String(i.id), i]));
+  const events = [];
+  const payers = new Set();
+
+  for (const i of invoices) {
+    const d = invoiceExpected(i);
+    if (!d) continue;
+    const payer = String(i.client_name || '?');
+    payers.add(payer);
+    events.push({ id: 'in:' + i.id, kind: 'payin', payer, resourceId: 'payin',
+                  name: money(i.amount) + ' \u00b7 ' + payer,
+                  startDate: d, endDate: addDays(d, 1), allDay: true });
+  }
+  for (const p of payments) {
+    const d = plannedDate(p, invById);
+    if (!d) continue;
+    const inv = invById.get(String(p.linked_invoice_id));
+    const payer = inv ? String(inv.client_name || '?') : 'Unlinked';
+    events.push({ id: 'out:' + p.id, kind: 'payout', payer, resourceId: 'payout',
+                  name: money(p.amount) + ' \u00b7 ' + String(p.supplier_name || '?'),
+                  startDate: d, endDate: addDays(d, 1), allDay: true });
+  }
+  return { events, payers: [...payers].sort() };
+}
+
+async function main() {
+  const f = takeFlash();
+  if (f) say(f.text, f.cls);
+  if (!requireKey()) return;
+
+  let Calendar, data;
+  try { ({ Calendar } = await import('/vendor/bryntum/calendar/calendar.module.js')); }
+  catch (e) { return say('Could not load Bryntum Calendar: ' + e.message, 'err'); }
+  try { data = await loadAll(); }
+  catch (e) { return say('Could not load data: ' + e.message, 'err'); }
+
+  const { events, payers } = build(data.invoices, data.payments);
+  const payerEl = document.getElementById('payer');
+  for (const p of payers) {
+    const o = document.createElement('option');
+    o.value = p;
+    o.textContent = p;
+    payerEl.appendChild(o);
+  }
+
+  // Bryntum Calendar only draws events that belong to a calendar (a resource),
+  // so pay-ins and payouts are two calendars with their own colour.
+  const calendar = new Calendar({
+    appendTo: 'view',
+    date: new Date(),
+    mode: 'month',
+    resources: [
+      { id: 'payin', name: 'Pay-ins', eventColor: 'violet' },
+      { id: 'payout', name: 'Payouts', eventColor: 'orange' },
+    ],
+    events: [],
+  });
+
+  const apply = () => {
+    const kind = document.getElementById('kind').value;
+    const payer = payerEl.value;
+    const rows = events
+      .filter((e) => (kind === 'both' || e.kind === kind) && (payer === 'all' || e.payer === payer))
+      .map((e) => ({ id: e.id, name: e.name, startDate: e.startDate, endDate: e.endDate, allDay: true, resourceId: e.resourceId }));
+    calendar.eventStore.data = rows;
+    console.info('[calendar] events in store', calendar.eventStore.count);
+    say(rows.length + ' date' + (rows.length === 1 ? '' : 's') + ' shown.');
+  };
+  document.getElementById('kind').onchange = apply;
+  payerEl.onchange = apply;
+  apply();
+}
+main();
+</script>
+</body>
+</html>

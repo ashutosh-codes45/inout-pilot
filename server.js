@@ -10,11 +10,17 @@ import {
   releaseWaitingForInvoice, cancelWaiting, payNow,
 } from './payments.js';
 import { computeScores } from './scores.js';
+import { computeShift } from './shift.js';
+import { draftExtension } from './alerts.js';
 
 const app = express();
 app.use(express.json());
 app.use('/vendor/ag-grid', express.static('node_modules/ag-grid-community'));
-app.use('/vendor/bryntum', express.static('node_modules/@bryntum/scheduler'));
+// Bryntum views (trial packages), mounted read-only from node_modules.
+app.use('/vendor/bryntum/schedulerpro', express.static('node_modules/@bryntum/schedulerpro'));
+app.use('/vendor/bryntum/gantt', express.static('node_modules/@bryntum/gantt'));
+app.use('/vendor/bryntum/calendar', express.static('node_modules/@bryntum/calendar'));
+app.use('/vendor/bryntum/taskboard', express.static('node_modules/@bryntum/taskboard'));
 app.use(express.static('public')); // dashboard (data endpoints below need the key)
 
 // ---------- auth for everything except the PayPal webhook ----------
@@ -97,13 +103,64 @@ app.post('/payments/:id/pay-now', requireAdmin, async (req, res) => {
 app.post('/payments/:id/extension', requireAdmin, async (req, res) => {
   try {
     const { data, error } = await supabase.from('payments')
-      .select('id, supplier_name, extension_draft')
+      .select('id, supplier_name, amount, due_date, extension_draft')
       .eq('id', req.params.id).eq('status', 'WAITING_FOR_CLIENT').maybeSingle();
     if (error) throw error;
-    if (!data?.extension_draft) throw new Error('No extension draft for this payment');
+    if (!data) throw new Error('No waiting payout for this payment');
+
+    let draft = data.extension_draft;
+    if (!draft) {
+      const today = new Date(new Date().toISOString().slice(0, 10));
+      const daysLeft = data.due_date ? Math.round((new Date(data.due_date) - today) / 86400000) : 0;
+      draft = await draftExtension(data, daysLeft);
+      const { error: e2 } = await supabase.from('payments').update({ extension_draft: draft }).eq('id', data.id);
+      if (e2) throw e2;
+    }
     await logEvent('extension_requested', req.params.id);
-    res.json(data);
+    res.json({ ...data, extension_draft: draft });
   } catch (e) { res.status(409).json({ error: e.message }); }
+});
+
+// ---------- Timeline: move an invoice's expected pay date (and the payouts waiting on it) ----------
+app.post('/api/invoices/:id/shift', requireAdmin, async (req, res) => {
+  try {
+    const { data: invoice, error: e1 } = await supabase.from('invoices')
+      .select('*').eq('id', req.params.id).maybeSingle();
+    if (e1) throw e1;
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    const { data: payouts, error: e2 } = await supabase.from('payments')
+      .select('id, status, planned_date, due_date').eq('linked_invoice_id', invoice.id);
+    if (e2) throw e2;
+
+    let plan;
+    try {
+      plan = computeShift(invoice, payouts ?? [], req.body?.expected_pay_date);
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
+
+    const { error: e3 } = await supabase.from('invoices')
+      .update({ expected_pay_date: plan.invoice.expected_pay_date }).eq('id', invoice.id);
+    if (e3) throw e3;
+
+    for (const p of plan.payouts) {
+      const { error: e4 } = await supabase.from('payments')
+        .update({ planned_date: p.planned_date }).eq('id', p.id);
+      if (e4) throw e4;
+    }
+
+    // The PayPal invoice and the client are untouched on purpose.
+    await logEvent('expected_pay_shifted',
+      `${invoice.id}: ${invoice.expected_pay_date ?? invoice.due_date} -> ${plan.invoice.expected_pay_date} (${plan.days} days)`);
+
+    res.json({
+      invoice: { ...invoice, expected_pay_date: plan.invoice.expected_pay_date },
+      payouts: plan.payouts,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ---------- Dashboard data ----------
